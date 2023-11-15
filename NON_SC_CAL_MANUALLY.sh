@@ -43,6 +43,16 @@ else
 	echo "Calculation not converged, no auto_submission proceeded."
 fi
 
+check_d_f_elements (){
+
+    # Check for d and f elements in POSCAR
+    if grep -qiE 'Sc|Ti|V|Cr|Mn|Fe|Co|Ni|Cu|Zn|Y|Zr|Nb|Mo|Tc|Ru|Rh|Pd|Ag|Cd|La|Ce|Pr|Nd|Pm|Sm|Eu|Gd|Tb|Dy|Ho|Er|Tm|Yb|Lu' POSCAR ||
+       grep -qiE 'Ac|Th|Pa|U|Np|Pu|Am|Cm|Bk|Cf|Es|Fm|Md|No|Lr' POSCAR; then
+       echo -e "\033[33mThe POSCAR contains d or f block elements, modify LMAXMIX accordingly.\033[0m"
+    fi
+
+}
+
 file_editor (){
 	cd $NEW_DIRECTORY
 	sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
@@ -59,5 +69,6 @@ file_editor (){
 
 echo "---------------------------------------------------------"
 file_editor
+check_d_f_elements
 echo "---------------------------------------------------------"
 
