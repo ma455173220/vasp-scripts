@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SUBMISSION_SCRIPT=$(grep -l "#PBS -P ad73" * -d skip)
+SUBMISSION_SCRIPT=$(grep -l "#PBS -P ad73" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
 COPY_FILES_NEEDED="INCAR POSCAR POTCAR $SUBMISSION_SCRIPT"
 LN_FILES_NEEDED="CHGCAR WAVECAR"
 NEW_DIRECTORY="BAND"
