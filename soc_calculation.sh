@@ -98,6 +98,7 @@ file_editor (){
     NBANDS_COLLINEAR=`grep NBANDS OUTCAR | awk -F '=' '{print $NF}'`
     NBANDS_NONCOLLINEAR=$(expr $NBANDS_COLLINEAR \* 2)
     cd $NEW_DIRECTORY
+    sed  -i 's/VASP_EXE="[^"]*"/VASP_EXE="vasp_ncl"/' $SUBMISSION_SCRIPT
     sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
     sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
     sed  -i '/^NELMIN/s/^/# /' INCAR
