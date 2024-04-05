@@ -1,14 +1,15 @@
 #!/bin/sh
 
 
-NEW_DIRECTORY="NON-SC-kmesh-0.03"
-FILES_REMOVED="WAVECAR CHG* vasprun.xml PROCAR LOCPOT DOSCAR vaspout.h5"
+NEW_DIRECTORY="SOC"
+FILES_REMOVED=""
 SUBMISSION_SCRIPT=$(grep -l "#PBS -P ad73" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
 FILES_NEEDED="INCAR CONTCAR POTCAR KPOINTS $SUBMISSION_SCRIPT"
-echo $FILES_NEEDED
+LN_FILES_NEEDED="CHGCAR"
+echo $FILES_NEEDED $LN_FILES_NEEDED
 
 echo "---------------------------------------------------------"
-CONVERGENCE_TEST=`grep 'reached required accuracy' $PWD/OUTCAR`
+CONVERGENCE_TEST=`grep 'EDIFF is reached' $PWD/OUTCAR`
 if [ "$CONVERGENCE_TEST" ] ;  then
     if [ ! -d $NEW_DIRECTORY ] ; then
         mkdir $NEW_DIRECTORY
@@ -32,6 +33,19 @@ if [ "$CONVERGENCE_TEST" ] ;  then
                 cp $files $NEW_DIRECTORY
                 echo "'$files' -> '$NEW_DIRECTORY/$files'"
             fi
+        else
+            echo -e "\033[31mERROR:\033[0m $files does not exist or is an empty file!"
+            echo "---------------------------------------------------------"
+            exit
+        fi
+    done
+
+    for files in $LN_FILES_NEEDED ; do
+        if [ -s $files ] ; then
+            cd $NEW_DIRECTORY
+            ln -s ../$files .
+            cd ..
+            echo "link '$files' -> '$NEW_DIRECTORY/$files'"
         else
             echo -e "\033[31mERROR:\033[0m $files does not exist or is an empty file!"
             echo "---------------------------------------------------------"
@@ -81,15 +95,22 @@ check_d_f_elements (){
 }
 
 file_editor (){
+    NBANDS_COLLINEAR=`grep NBANDS OUTCAR | awk -F '=' '{print $NF}'`
+    NBANDS_NONCOLLINEAR=$(expr $NBANDS_COLLINEAR \* 2)
     cd $NEW_DIRECTORY
     sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
     sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
     sed  -i '/^NELMIN/s/^/# /' INCAR
-    sed  -i '/^LWAVE/ s/=.*#/=  .TRUE.            #/' INCAR
-    sed  -i '/^LCHARG/ s/=.*#/=  .TRUE.            #/' INCAR
-    sed  -i '0,/# LAECHG/ s/# LAECHG/LAECHG/' INCAR
-    echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
-    grep -E "^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'
+    sed  -i '/^LWAVE/ s/=.*#/=  .FALSE.            #/' INCAR
+    sed  -i '/^LCHARG/ s/=.*#/=  .FALSE.            #/' INCAR
+    sed  -i '/^LAECHG/ s/=.*#/=  .FALSE.            #/' INCAR
+    sed  -i '0,/# LSORBIT/ s/# LSORBIT/LSORBIT/' INCAR
+    sed  -i '0,/# GGA_COMPAT/ s/# GGA_COMPAT/GGA_COMPAT/' INCAR
+    sed  -i '1,/# ISYM = -1/ s/# ISYM = -1/ISYM = -1/' INCAR
+    sed  -i 's/\(#\|\)\s*ICHARG\s*=.*/ICHARG = 11/' INCAR
+    sed  -i "s/# NBANDS.*collinear-run.*/NBANDS = $NBANDS_NONCOLLINEAR/" INCAR
+    # echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
+    grep -E "^ICHARG|^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'
     cd ..
 }
 
