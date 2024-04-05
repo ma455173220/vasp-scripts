@@ -85,9 +85,9 @@ file_editor (){
     sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
     sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
     sed  -i '/^NELMIN/s/^/# /' INCAR
-    sed  -i '/^LWAVE/ s/=.*#/=  .TRUE.            #/' INCAR
-    sed  -i '/^LCHARG/ s/=.*#/=  .TRUE.            #/' INCAR
-    sed  -i '0,/# LAECHG/ s/# LAECHG/LAECHG/' INCAR
+    sed  -i 's/\(#\|\)\s*LWAVE\s*=.*/LWAVE=  .TRUE.   #(Write WAVCAR or not)/' INCAR
+    sed  -i 's/\(#\|\)\s*LCHARG\s*=.*/LCHARG=  .TRUE.   #(Write CHGCAR or not)/' INCAR
+    sed  -i 's/\(#\|\)\s*LAECHG\s*=.*/LAECHG=  .TRUE.   #(Bader charge analysis)/' INCAR
     echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
     grep -E "^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'
     cd ..

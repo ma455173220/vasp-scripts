@@ -101,14 +101,14 @@ file_editor (){
     sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
     sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
     sed  -i '/^NELMIN/s/^/# /' INCAR
-    sed  -i '/^LWAVE/ s/=.*#/=  .FALSE.            #/' INCAR
-    sed  -i '/^LCHARG/ s/=.*#/=  .FALSE.            #/' INCAR
-    sed  -i '/^LAECHG/ s/=.*#/=  .FALSE.            #/' INCAR
-    sed  -i '0,/# LSORBIT/ s/# LSORBIT/LSORBIT/' INCAR
-    sed  -i '0,/# GGA_COMPAT/ s/# GGA_COMPAT/GGA_COMPAT/' INCAR
-    sed  -i '1,/# ISYM = -1/ s/# ISYM = -1/ISYM = -1/' INCAR
+    sed  -i 's/\(#\|\)\s*LWAVE\s*=.*/LWAVE=  .FALSE.   #(Write WAVCAR or not)/' INCAR
+    sed  -i 's/\(#\|\)\s*LCHARG\s*=.*/LCHARG=  .FALSE.   #(Write CHGCAR or not)/' INCAR
+    sed  -i 's/\(#\|\)\s*LAECHG\s*=.*/LAECHG=  .FALSE.   #(Bader charge analysis)/' INCAR
+    sed  -i 's/\(#\|\)\s*LSORBIT\s*=.*/LSORBIT = .TRUE.   #(Activate SOC)/' INCAR
+    sed  -i 's/\(#\|\)\s*GGA_COMPAT\s*=.*/GGA_COMPAT = .FALSE.   #(Apply spherical cutoff on gradient field)/' INCAR  
+    sed  -i 's/\(#\|\)\s*ISYM\s*=.*/ISYM= -1/' INCAR
     sed  -i 's/\(#\|\)\s*ICHARG\s*=.*/ICHARG = 11/' INCAR
-    sed  -i "s/# NBANDS.*collinear-run.*/NBANDS = $NBANDS_NONCOLLINEAR/" INCAR
+    sed  -i "s/# NBANDS.*collinear-run.*/NBANDS = $NBANDS_NONCOLLINEAR   #(2 * number of bands of collinear-run)/" INCAR
     # echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
     grep -E "^ICHARG|^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'
     cd ..
