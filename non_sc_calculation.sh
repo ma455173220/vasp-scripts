@@ -80,6 +80,23 @@ check_d_f_elements (){
 
 }
 
+read_kpoints(){
+
+    # Read the content of the fourth line and split it into individual numbers 
+	line=$(sed -n '4p' KPOINTS)                                                
+	read -ra numbers <<< "$line"                                               
+	                                                                           
+	# Check if each number is equal to 1                                       
+	vasp_mod="vasp_gam"                                                        
+	for number in "${numbers[@]}"; do                                          
+	    if [ "$number" != "1" ]; then                                          
+	        vasp_mod="vasp_std"                                                
+	        break                                                              
+	    fi                                                                     
+	done                                                                       
+
+}
+
 file_editor (){
     cd $NEW_DIRECTORY
     sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
@@ -88,7 +105,10 @@ file_editor (){
     sed  -i 's/\(#\|\)\s*LWAVE\s*=.*/LWAVE=  .TRUE.   #(Write WAVCAR or not)/' INCAR
     sed  -i 's/\(#\|\)\s*LCHARG\s*=.*/LCHARG=  .TRUE.   #(Write CHGCAR or not)/' INCAR
     sed  -i 's/\(#\|\)\s*LAECHG\s*=.*/LAECHG=  .TRUE.   #(Bader charge analysis)/' INCAR
+    # Generate denser kmesh
     echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
+    read_kpoints
+    sed -i "s/VASP_EXE=\"[^\"]*\"/VASP_EXE=\"$vasp_mod\"/" "$SUBMISSION_SCRIPT"
     grep -E "^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'
     cd ..
 }
