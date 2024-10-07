@@ -3,7 +3,7 @@
 
 NEW_DIRECTORY="NON-SC-kmesh-0.03"
 FILES_REMOVED="WAVECAR CHG* vasprun.xml PROCAR LOCPOT DOSCAR vaspout.h5"
-SUBMISSION_SCRIPT=$(grep -l "#PBS -P ad73" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
+SUBMISSION_SCRIPT=$(grep -l "#PBS -P " --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
 FILES_NEEDED="INCAR CONTCAR POTCAR KPOINTS $SUBMISSION_SCRIPT"
 echo $FILES_NEEDED
 
