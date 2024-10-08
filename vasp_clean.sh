@@ -3,7 +3,7 @@
 # Set the list of filenames to delete, common large VASP files
 LARGE_FILES=(
     "WAVECAR" "CHG" "CHGCAR" "LOCPOT" "PROCAR" "POT" "vasprun.xml" "vaspout.h5"
-    "*.amn" "*.mmn" "*.chk" "*.spn" "*_wsvec.dat" "*_symmed_hr.dat" "*_hr.dat"
+    "*.amn" "*.mmn" "*.chk" "*.spn" "*.spn.fmt" "*.npz" "*_wsvec.dat" "*_symmed_hr.dat" "*_hr.dat"
 )
 
 # Traverse the current directory and all subdirectories, deleting specified large files
