@@ -75,16 +75,16 @@ file_editor (){
 	cd $NEW_DIRECTORY
 	if [[ ! -n "$METAGGA_CHECK" ]]; then
 		sed  -i '0,/# ICHARG/ s/# ICHARG/ICHARG/' INCAR
-		sed  -i '/^ICHARG/ s/=.*#/=  11            #/' INCAR
+        sed  -i '/^ICHARG/ s/=.*/=  11          #(Non-self-consistent: GGA/LDA band structures)/' INCAR
 	fi
-	sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
-	sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
+    sed  -i '/^NSW/ s/=.*/=  0        #(Non SCF calculation)/' INCAR
+    sed  -i '/^IBRION/ s/=.*/=  -1         #(Non SCF calculation)/' INCAR
 	sed  -i '0,/# LWAVE/ s/# LWAVE/LWAVE/' INCAR
-	sed  -i '/^LWAVE/ s/=.*#/=  .FALSE.            #/' INCAR
+    sed  -i '/^LWAVE/ s/=.*/=  .FALSE.        #(Write WAVECAR or not)/' INCAR
 	sed  -i '0,/# LCHARG/ s/# LCHARG/LCHARG/' INCAR
-	sed  -i '/^LCHARG/ s/=.*#/=  .FALSE.            #/' INCAR
+    sed  -i '/^LCHARG/ s/=.*/=  .FALSE.        #(Write CHGCAR or not)/' INCAR
 	sed  -i '0,/# LORBIT/ s/# LORBIT/LORBIT/' INCAR
-	sed  -i '/^LORBIT/ s/=.*#/=  11            #/' INCAR
+    sed  -i '/^LORBIT/ s/=.*/=  11          #(11 for projected DOS)/' INCAR
 	grep -E "^NSW|^LORBIT|^IBRION|^LCHARG|^LWAVE|^ICHARG" INCAR | awk -F "#" '{print $1}'
     cd ..
 }

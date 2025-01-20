@@ -99,12 +99,14 @@ read_kpoints(){
 
 file_editor (){
     cd $NEW_DIRECTORY
-    sed  -i '/^NSW/ s/=.*#/=  0            #/' INCAR
-    sed  -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
+    sed  -i '/^NSW/ s/=.*/=  0       #(Non SCF calculation)/' INCAR
+    sed  -i '/^IBRION/ s/=.*/=  -1         #(Non SCF calculation)/' INCAR
     sed  -i '/^NELMIN/s/^/# /' INCAR
     sed  -i 's/\(#\|\)\s*LWAVE\s*=.*/LWAVE=  .TRUE.   #(Write WAVCAR or not)/' INCAR
     sed  -i 's/\(#\|\)\s*LCHARG\s*=.*/LCHARG=  .TRUE.   #(Write CHGCAR or not)/' INCAR
     sed  -i 's/\(#\|\)\s*LAECHG\s*=.*/LAECHG=  .TRUE.   #(Bader charge analysis)/' INCAR
+    echo "LORBIT =  11       #(PAW radii for projected DOS)" >> INCAR
+    echo "NEDOS  =  2001         #(DOSCAR points)" >> INCAR
     # Generate denser kmesh
     echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
     read_kpoints
