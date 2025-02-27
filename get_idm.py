@@ -17,8 +17,10 @@ Improved Dimer Method - General Calculation Steps:
    NFREE = 2
    NWRITE = 3 # Must be 3
 3) Run this script:
+   Copy the unfreezed POSCAR file and rename it to POSCAR_relax.
    get_dimer.py 
 4) Use the POSCAR for IDM calc:
+   Use original KPOINTS.
    NSW = 500           
    IBRION=44           # Use the dimer method as optimization engine
    POTIM = 0.05
