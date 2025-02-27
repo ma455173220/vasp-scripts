@@ -1,0 +1,15 @@
+slab { // from sawtooth calculation
+fromZ = 14.19868401;
+toZ = 20.497008901;
+epsilon = 16.93076923076923;
+}
+
+charge {
+posZ = 10; // estimated position 
+Q = -2.; // Classical charge state : −1
+}
+
+isolated { 
+fromZ = 14.19868401-0.5;
+toZ = 20.497008901+0.5;
+}
