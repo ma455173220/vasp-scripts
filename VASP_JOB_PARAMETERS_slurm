@@ -1,0 +1,78 @@
+#!/bin/bash
+
+REMOVE_RENAME_FILES="CHG PCDAT REPORT" # vaspout.h5
+COPY_RENAME_FILES="CONTCAR OSZICAR OUTCAR XDATCAR EIGENVAL" 
+BACKUP_INPUT_FILES="INCAR POSCAR"
+
+bader_cal (){
+    /software/projects/pawsey0328/hma/scripts/vtstscripts-1035/chgsum.pl  AECCAR0 AECCAR2
+    /software/projects/pawsey0328/hma/scripts/vasp-scripts/bader CHGCAR -ref CHGCAR_sum 
+    rm -rf ${SLURM_SUBMIT_DIR}/AECCAR* ${SLURM_SUBMIT_DIR}/CHGCAR_sum
+}
+
+log_report (){
+    echo -e "\n------------------------------------------------------" >> ~/vasp_job_log
+    echo -e "Job finished at \c" >> ~/vasp_job_log && date >> ~/vasp_job_log
+    echo -e "PATH: ${SLURM_SUBMIT_DIR}" >> ~/vasp_job_log
+    echo -e "------------------------------------------------------" >> ~/vasp_job_log
+}
+
+backup_input_files () {                               
+    for ii in $BACKUP_INPUT_FILES ; do       
+        cp $ii ${JOBNAME}_${ii}         
+    done                                    
+}                                               
+
+rename_files () {
+    #        for i in $MOVE_RENAME_FILES ; do
+    #                mv $i ${JOBNAME}_${i}
+    #        done
+    for ii in $COPY_RENAME_FILES ; do
+        cp $ii ${JOBNAME}_${ii}
+    done
+    if [ -s CONTCAR ] ; then
+        cp CONTCAR POSCAR
+    fi
+}
+
+remove_files (){
+    for ii in $REMOVE_RENAME_FILES ; do
+        rm $ii
+    done
+}
+
+print_band_gap (){
+    echo 911 | vaspkit > band_gap
+    echo -e "211\n" | vaspkit
+    # python3 /home/561/hm1876/.local/bin/band_vaspkit.py
+}
+
+print_dos (){
+    echo -e "111\n1" | vaspkit > TDOS_log
+    echo -e "113\nall\n1" | vaspkit > PDOS_log
+    echo -e "116" | vaspkit > LDOS_log
+}
+
+
+final_act (){
+    if [ -e AECCAR2 ] ; then
+        bader_cal
+    fi
+
+    print_band_gap
+    print_dos
+    MODE_CHECK=`grep "^IBRION" INCAR | awk -F ' '  '{print $3}'`
+    if [ $MODE_CHECK -ne -1 ] ; then
+    	rename_files
+    fi
+    remove_files
+    log_report
+    exit
+
+}
+
+MODE_CHECK=`grep "^IBRION" INCAR | awk -F ' '  '{print $3}'`
+if [ $MODE_CHECK -ne -1 ] ; then
+	backup_input_files
+fi
+trap 'final_act' EXIT

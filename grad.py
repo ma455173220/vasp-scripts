@@ -1,4 +1,4 @@
-﻿#!/home/561/hm1876/.local/miniconda3/bin/python3
+﻿#!/usr/bin/python3
 
 import subprocess
 import os
