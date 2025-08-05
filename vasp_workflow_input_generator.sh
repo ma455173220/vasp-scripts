@@ -91,6 +91,7 @@ update_key INCAR_scf "NSW"    "0"        "Non-SCF calculation"
 update_key INCAR_scf "IBRION" "-1"       "Non-SCF calculation"
 update_key INCAR_scf "IOPT"   "COMMENT"  "Disable IOPT for SCF"
 update_key INCAR_scf "ICORELEVEL" "1" "Core energies"
+update_key INCAR_scf "LVTOT" ".TRUE."    "Write total local potential"
 
 # ===== Step 4 =====
 echo ">>> STEP 4: LMAXMIX Adjustment based on POSCAR"
@@ -134,6 +135,7 @@ update_key INCAR_band "LWAVE"  ".FALSE." "Disable WAVECAR"
 update_key INCAR_band "LCHARG" ".FALSE." "Disable CHGCAR"
 update_key INCAR_band "LAECHG" ".FALSE." "Disable AECCAR"
 update_key INCAR_band "ICORELEVEL" "COMMENT" "Core energies"
+update_key INCAR_band "LVTOT" "COMMENT"    "Write total local potential"
 echo ">>> STEP 7: Generating KPOINTS_band"
 echo -e "303\n" | vaspkit > /dev/null 2>&1
 mv KPATH.in KPOINTS_band
