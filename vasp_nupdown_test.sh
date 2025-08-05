@@ -30,7 +30,7 @@
 SUBMISSION_SCRIPT="vasp_runscript"
 SUBMISSION_CMD="sbatch"
 DEFECT_PATH="v_O*"
-SUMMARY_LOG="summary.log"
+SUMMARY_LOG="summary.csv"
 
 root_dir=$PWD
 
