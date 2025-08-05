@@ -90,6 +90,7 @@ update_key INCAR_scf "LAECHG" ".TRUE."   "Write AECCAR for Bader analysis"
 update_key INCAR_scf "NSW"    "0"        "Non-SCF calculation"
 update_key INCAR_scf "IBRION" "-1"       "Non-SCF calculation"
 update_key INCAR_scf "IOPT"   "COMMENT"  "Disable IOPT for SCF"
+update_key INCAR_scf "ICORELEVEL" "1" "Core energies"
 
 # ===== Step 4 =====
 echo ">>> STEP 4: LMAXMIX Adjustment based on POSCAR"
@@ -132,6 +133,7 @@ update_key INCAR_band "ICHARG" "11"     "Band structure calculation"
 update_key INCAR_band "LWAVE"  ".FALSE." "Disable WAVECAR"
 update_key INCAR_band "LCHARG" ".FALSE." "Disable CHGCAR"
 update_key INCAR_band "LAECHG" ".FALSE." "Disable AECCAR"
+update_key INCAR_band "ICORELEVEL" "COMMENT" "Core energies"
 echo ">>> STEP 7: Generating KPOINTS_band"
 echo -e "303\n" | vaspkit > /dev/null 2>&1
 mv KPATH.in KPOINTS_band

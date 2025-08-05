@@ -62,7 +62,7 @@ final_act (){
     print_band_gap
     print_dos
     MODE_CHECK=`grep "^IBRION" INCAR | awk -F ' '  '{print $3}'`
-    if [ $MODE_CHECK -ne -1 ] ; then
+    if [ -z "$MODE_CHECK" ] || [ "$MODE_CHECK" != "-1" ]; then
     	rename_files
     fi
     remove_files
@@ -72,7 +72,7 @@ final_act (){
 }
 
 MODE_CHECK=`grep "^IBRION" INCAR | awk -F ' '  '{print $3}'`
-if [ $MODE_CHECK -ne -1 ] ; then
-	backup_input_files
+if [ -z "$MODE_CHECK" ] || [ "$MODE_CHECK" != "-1" ]; then
+    backup_input_files
 fi
 trap 'final_act' EXIT
