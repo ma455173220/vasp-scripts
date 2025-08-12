@@ -14,8 +14,12 @@
 # RUN_STEPS=(3 4 5)       # Skip optimization, run SCF + Band + DOS
 # RUN_STEPS=(4)           # Only run Band (requires SCF already done)
 ##############################################
-RUN_STEPS=(1 2 3 4 5)
-JOB_NAME="STO_opt"
+RUN_STEPS=(1 2 3)
+JOB_NAME="STO-s431_opt"
+
+# Whether to apply dipole correction (true/false)
+# 1 = enable dipole correction, 0 = disable
+USE_DIPOL_CORR=0
 
 # ===== Submission script base name (customize here) =====
 RUNSCRIPT_BASE="vasp_runscript"  # Change this prefix to customize submission script names
@@ -88,6 +92,11 @@ if [[ " ${RUN_STEPS[@]} " =~ " 2 " ]]; then
     cp INCAR_step2 INCAR
     cp KPOINTS_step2 KPOINTS
     cp CONTCAR POSCAR
+    # Define DIPOL for dipole correction from the structure's center of mass
+    if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
+        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+    fi
     JOBID2=$($SUB_CMD ${RUNSCRIPT_BASE}_step2 | awk '{print $NF}')
     check_job_done 2 $JOBID2 "opt" "$ROOT_DIR"
 fi
@@ -104,6 +113,11 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cp POTCAR "$SCF_DIR/"
     cp CONTCAR "$SCF_DIR/POSCAR"
     cd "$SCF_DIR"
+    # Define DIPOL for dipole correction from the structure's center of mass
+    if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
+        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+    fi
     JOBID3=$($SUB_CMD ${RUNSCRIPT_BASE}_scf | awk '{print $NF}')
     check_job_done 3 $JOBID3 "scf" "$SCF_DIR"
     cd "$ROOT_DIR"

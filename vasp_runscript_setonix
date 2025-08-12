@@ -1,0 +1,48 @@
+#!/bin/bash --login
+
+#SBATCH --job-name=name
+#SBATCH --account=pawsey0328
+#SBATCH --partition=work
+#SBATCH --ntasks=128
+#SBATCH --nodes=1
+#SBATCH --mem=230G      #Indicate the amount of memory per node when asking for share resources
+#SBATCH --time=24:00:00
+#SBATCH --output=output_%j.txt
+
+JOBNAME="01"
+VASP_EXE="vasp_std"
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/software/projects/pawsey0328/hma/lib
+
+source ~/VASP_JOB_PARAMETERS
+
+#Modules
+module load gcc/12.2.0
+# OpenBLAS
+export LD_LIBRARY_PATH=/software/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/openblas-0.3.24-n2a4fbqc4rpdjmefdmu5buetc2jf6nup/lib:$LD_LIBRARY_PATH
+
+# ScaLAPACK
+export LD_LIBRARY_PATH=/software/setonix/2023.08/software/linux-sles15-zen3/gcc-12.2.0/netlib-scalapack-2.2.0-f5zvd7dyet3th5tiizuig75hbqwshnte/lib:$LD_LIBRARY_PATH
+
+# FFTW
+export LD_LIBRARY_PATH=/software/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/fftw-3.3.10-t6emoostwoqnfe3d2wahozs44vatrzvz/lib:$LD_LIBRARY_PATH
+
+# HDF5
+export LD_LIBRARY_PATH=/software/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/hdf5-1.14.3-2j3z6flht355uyrmwsqsjr67qnfitpju/lib:$LD_LIBRARY_PATH
+
+# Wannier90
+export LD_LIBRARY_PATH=/software/projects/pawsey0328/hma/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/wannier90-3.1.0-p7jj5mfnqezcbm7nykwxxvlum65whhoo/lib:$LD_LIBRARY_PATH
+
+# OpenMP settings
+# export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK ## Recommended: Use a thread count that is a multiple of 8 for optimal performance 
+# export OMP_PLACES=cores     
+# export OMP_PROC_BIND=close  
+# export FI_CXI_DEFAULT_VNI=$(od -vAn -N4 -tu < /dev/urandom)
+
+# Settings for MPI jobs
+export OMP_NUM_THREADS=1
+export MPICH_OFI_STARTUP_CONNECT=1
+export MPICH_OFI_VERBOSE=1
+export FI_CXI_DEFAULT_VNI=$(od -vAn -N4 -tu < /dev/urandom)
+
+srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $OMP_NUM_THREADS -m block:block:block /software/projects/pawsey0328/hma/vasp/vasp.6.4.3_vtst_wannier90/bin/$VASP_EXE > vasp_log 2>&1
