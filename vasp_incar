@@ -1,0 +1,196 @@
+### Global Parameters ###
+ISTART =  1            #(Read existing wavefunction; if there)
+# ICHARG =  11         #(Non-self-consistent: GGA/LDA band structures)
+# LREAL  = Auto        #(Projection operators: automatic; try this when No. of atoms > 30)
+                       #(Default: .FALSE.)
+# PREC   =  Accurate       #(Precision level; or using PREC=Accurate)
+# ALGO   =  Fast         #(ALGO=All: stable but time consuming; ALGO=VeryFast: fast but not stable)
+LWAVE  = .FALSE.     #(Write WAVECAR or not)
+LCHARG = .FALSE.     #(Write CHGCAR or not)
+# LAECHG = .TRUE.      #(Bader charge analysis)
+# ADDGRID= .TRUE.      #(Increase grid; helps GGA convergence)
+### When ISPIN = 1
+# AMIX = 0.2 ; BMIX = 0.0001
+### When ISPIN = 2
+# AMIX = 0.2 ; BMIX = 0.0001 ; AMIX_MAG = 0.8 ; BMIX_MAG = 0.0001
+# LVTOT  = .TRUE.      #(Write total electrostatic potential into LOCPOT or not)
+# LVHAR  = .TRUE.      #(Write ionic + Hartree electrostatic potential into LOCPOT or not)
+# NELECT =             #(No. of electrons: charged cells; be careful)
+# NPAR   = 4           #(Max is no. nodes; don't set for hybrids)
+NCORE = 32           #(Try NCORE=No. of cpus/node/2)
+# KPAR   = 2           #(Divides k-grid into separate groups, try KPAR=No. of nodes first)
+# NGX    = 500         #(FFT grid mesh density for nice charge/potential plots)
+# NGY    = 500         #(FFT grid mesh density for nice charge/potential plots)
+# NGZ    = 500         #(FFT grid mesh density for nice charge/potential plots)
+
+
+### DFT + VDW correction ###
+# IVDW = 12            #(10:DFT-D2; 11: DFT-D3)
+
+
+### Slab Calculation ###
+# Always use these two parameters for slab calculation
+# LDIPOL = .TRUE.      #(Adjust the polarisation)
+                       #(If do a molecular adsorption calculation, you may need to turn off this)
+# IDIPOL = 3           #(1-x; 2-y; 3-z; 4-all directions)
+
+
+### Work Function Calculation ###
+# LVHAR = .TRUE. 
+
+
+### Magnetic System ###
+ISPIN = 2            #(Spin polarised DFT;  default=1)
+# FERWE =            #(Sets the occupancies of the spin-up states)
+# FERDO =            #(Sets the occupancies of the spin-down states)
+# MAGMOM = 2*1 3*1     #(No of Atoms*MAGMOM value; setting MAGMOM 1.3*theoretical value)
+# NUPDOWN = 0
+# VOSKOWN = 1
+ 
+
+### Electronic Relaxation ###
+ISMEAR =  0            #(Gaussian smearing; metals:1)
+SIGMA  =  0.05          #(Smearing value in eV; smaller values increase the computational time; metals:0.2; gas molecule:0.01)
+                       #(Test SIGMA and make sure entropy T*S < 1-2 meV)
+NELM   =  100          #(Max electronic SCF steps)
+NELMIN =  4            #(Min electronic SCF steps)
+EDIFF  =  1E-05        #(SCF energy convergence; in eV)
+# GGA  =  PS           #(PBEsol exchange-correlation)
+# METAGGA = R2SCAN     #(METAGGA, using LASPH = .TRUE. is recommanded)
+LASPH = .TRUE.
+ 
+
+### Ionic Relaxation ###
+NSW    =  128          #(Max ionic steps; 0-Non SCF calculation)
+IBRION =  2            #(Algorithm: 0-MD; 1-Quasi-New; 2-CG; -1-Non SCF calculation; 5-Frequency calculation)
+# IOPT = 7 ; POTIM = 0 ; IBRION = 3 #(VTST force based optimizers: 7:Fire; 1:LBFGS; 2:CG)
+# POTIM = 0.1          #(Change the step width of of ionic relaxation; Default: 0.5:IBRION=1,2,3; 0.015:IBRION=5)
+ISIF   =  3            #(Stress/relaxation: 2-Ions, 3-Shape/Ions/V, 4-Shape/Ions)
+                       #(Use ISIF=2 for slab calculation)
+ENCUT  =  520          #(ISIF=3, use larger ENCUT)
+EDIFFG = -2E-02      #(Ionic convergence; eV/AA)
+# SYMPREC = 1E-06
+ISYM  =  0            #(Symmetry: 0=none; 2=GGA; 3=hybrids)
+
+### VTST ###
+# IMAGES =  5            #(no. of images excluding two endpoints, set a NEB run no. of nodes, must be dividable by no. of images. each group of nodes works on one image.   PLEASE CHANGE IT TO YOUR CHOICE NEBMAKE.PL)
+# IBRION =  3            #(do MD with a zero time step)
+# POTIM  =  0            #(Zero time step so that VASP does not move the ions)
+# SPRING =  -5.0         #(spring force (eV/A2) between images)
+# LCLIMB =  .TRUE.       #(turn on the CI-NEB algorithm)
+# ICHAIN =  0            #(Indicates which method to run. NEB (ICHAIN=0) is the default)
+# IOPT   =  2            #(7:Fire; 1:LBFGS; 2:CG. 1 and 2 for fine convergence, while 7 for rough convergence)
+
+### Hyperfine Tensor Calculation ###
+# LHYPERFINE = .TRUE.
+# NGYROMAG = 17.235 -8.465
+
+### zero-field splitting ###
+# LDMATRIX = .TRUE.
+
+### Frequency Calculation ###
+# IBRION = 5
+# POTIM  = 0.015
+# NFREE = 2       #(NFREE=2 for Frequency calculation)
+
+
+### DOS and Band structure Calculation ###
+# Use higher K-POINTS  k*a=45 
+# NEDOS  = 1000         #(Higher number gets a smoother curve)
+# EMIN = -5             #(the lower boundary of the energy range)
+# EMAX = 5              #(the upper boundary of the energy range)
+LORBIT = 11           #(11 for projected DOS)
+# ISMEAR = -5           #(This value can give a smooth DOS; but NOT use -5 when doing band structure calculation) 
+                        #(But remember NKPOINTS > 4 when using ISMEAR=-5)
+
+
+### DFT+U Calculation ###
+# LDAU   = .TRUE.       #(Activate DFT+U)
+# LDAUTYPE=  2           #(Dudarev; only U-J matters)
+# LDAUL  =  2 -1        #(Orbitals for each species;-1 no orbital; 1: p; 2: d; 3: f)
+# LDAUU  =  2  0        #(U for each species)
+# LDAUJ  =  0  0        #(J for each species)
+# LMAXMIX=  4           #(Mixing cut-off; 4-d, 6-f)
+
+
+### HSE06 Calculation ###
+# LHFCALC= .TRUE.     #   (Activate HF)
+# AEXX   =  0.25      #   (25% HF exact exchange, adjusted this value to reproduce experimental band gap)
+# HFSCREEN= 0.2       #   (Switch to screened exchange, e.g. HSE06)
+# ALGO   =  ALL       #   (Electronic Minimisation Algorithm, ALGO=58)
+# TIME   =  0.4       #   (Timestep for IALGO5X)
+# PRECFOCK= N         #   (HF FFT grid)
+# NKRED    = 2        # (Reduce k-grid-even only, see also NKREDX, NKREDY and NKREDZ)
+# HFLMAX   = 4        # (HF cut-off: 4d, 6f)
+# LDIAG    = .TRUE.   # (Diagnolise Eigenvalues)
+
+
+
+### Wannier90 ######
+## dis_froz_max should be smaller than the lowest energy of the next band (ie, num_wann+1) 
+## dis_win_max should be larger than the highest energy of the last considered band (ie, num_bands)
+# LWANNIER90 = .TRUE.  #(Apply wannier90)
+# LCALC_MMN  = .TRUE.
+# LCALC_AMN  = .TRUE.
+# LWRITE_MMN = .TRUE.
+# LWRITE_AMN = .TRUE.
+# LWRITE_EIG = .TRUE.
+# LWRITE_SPN = .TRUE.
+# LSPN_FMTED = .FALSE.
+# LWRITE_UNK = .TRUE.
+# NUM_BANDS = 12
+# NUM_WANN = 8
+# LSCDM = .TRUE.
+# CUTOFF_TYPE = gaussian
+# CUTOFF_MU =         #(0.8 * Fermi level of a system with NUM_WANN orbitals occupied)
+# CUTOFF_SIGMA = 0.1
+# WANNIER90_WIN = "
+# iprint = 2
+# dis_num_iter    =  1000000
+# num_iter  =  1000000      
+# write_xyz = true       
+# write_hr = true        
+# dis_froz_max    = 6.0
+# dis_win_max     = 16.5
+# dis_froz_min =
+# dis_win_min =
+# conv_window     = 5   
+# dis_conv_window = 5   
+# num_print_cycles  = 100
+# exclude_bands   =
+# guiding_centres = true
+# Begin Projections
+# Si:sp3
+# End Projections
+# auto_projections = .true.
+# "
+
+
+### Spin-Orbit Coupling ###
+### Geometry optimization first, then do NON-SC calculation with Spin-orbit coupling ###
+### After getting the WAVECAR and CHGCAR, do band or dos calculations as normal ### 
+# LSORBIT    = .TRUE.  #(Activate SOC)
+# GGA_COMPAT = .FALSE. #(Apply spherical cutoff on gradient field)
+# NBANDS   =           #(Set this parameters manually, 2 * number of bands of collinear-run)
+# ISYM = -1
+# VOSKOWN    =  1      #(Enhances the magnetic moments and the magnetic energies)
+# LMAXMIX    =  4      #(For d elements increase LMAXMIX to 4, f: LMAXMIX = 6)
+# SAXIS    =  0 0 1    #(Direction of the magnetic field)
+# MAGMOM   =  0 0 3    #(Set this parameters manually, Local magnetic moment parallel to SAXIS, 3*NIONS*1.0 for non-collinear magnetic systems)
+
+
+### Quadrupolar effect ###
+# LEFG = .TRUE.
+# QUAD_EFG = 40.59 0
+
+### STM ###
+# LPARD = .TRUE.
+# LSEPK = .TRUE.
+# LSEPB = .TRUE.
+# NBMOD = -3
+# EINT = -0.1 0.1
+# IBAND = 1295 1297
+
+### Core level ###
+# ICORELEVEL = 1
+

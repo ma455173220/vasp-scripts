@@ -446,6 +446,7 @@ LOGFILE="\$ROOT_DIR/vasp_workflow_status.log"
 SUB_CMD="sbatch --job-name=\$JOB_NAME" # Command to submit jobs
 
 echo "=== Workflow Started ===" > "\$LOGFILE"
+echo "Hostname: \$(hostname)" >> "\$LOGFILE"
 echo "Selected Steps: \${RUN_STEPS[@]}" >> "\$LOGFILE"
 
 ##############################################
