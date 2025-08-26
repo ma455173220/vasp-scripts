@@ -416,11 +416,11 @@ EOL
 
 if [ "$PERFORM_STEP0" = true ]; then
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(0 1 2 3)
+RUN_STEPS=(0 1 2 3 5)
 EOL
 else
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(1 2 3)
+RUN_STEPS=(1 2 3 5)
 EOL
 fi
 
@@ -472,6 +472,7 @@ check_job_done() {
             # Check convergence conditions
             if [[ \$check_mode == "opt" ]]; then
                 grep -q "Total CPU time used" "\$OUTCAR_FILE" && grep -q "reached required accuracy" "\$OUTCAR_FILE" \\
+                    && grep -q "EDIFF is reached" "\$OUTCAR_FILE" \\
                     && echo "✅ Step \$step completed successfully." >> "\$LOGFILE" \\
                     || { echo "❌ Step \$step failed." >> "\$LOGFILE"; exit 1; }
             elif [[ \$check_mode == "scf" ]]; then
