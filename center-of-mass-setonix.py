@@ -1,0 +1,5 @@
+#!/home/561/hm1876/miniconda3/bin/python3
+from ase.io import read
+slab = read("POSCAR")
+com = slab.get_center_of_mass(scaled=True)
+print("Center of mass (fractional):", com)
