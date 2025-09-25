@@ -683,6 +683,12 @@ elif [[ " ${RUN_STEPS[@]} " =~ " 5 " ]]; then
 fi
 
 echo "=== Workflow Completed at $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOGFILE"
+{
+  echo "==============================================="
+  echo "=== Workflow Completed at $(date '+%Y-%m-%d %H:%M:%S') ==="
+  echo "=== $(pwd) ==="
+  echo "==============================================="
+} >> ~/vasp_workflow_log
 EOL
 
 chmod +x "$WORKFLOW_SCRIPT"
