@@ -56,6 +56,7 @@ check_command "vaspkit" "VASP toolkit for generating KPOINTS"
 echo ""
 echo "Checking Python scripts (if exist)..."
 # Common Python scripts that might be used
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
 check_command "center-of-mass.py" "Center of mass calculation for dipole correction"
 
 echo ""
@@ -509,6 +510,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 0 " ]]; then
     cp KPOINTS_step0 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
@@ -543,6 +545,7 @@ fi
 cat >> "$WORKFLOW_SCRIPT" << 'EOL'
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
@@ -561,6 +564,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 2 " ]]; then
     cp KPOINTS_step2 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
@@ -582,6 +586,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cd "$SCF_DIR"
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
@@ -605,6 +610,7 @@ run_band() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_band" ${RUNSCRIPT_BASE}_band
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
@@ -628,6 +634,7 @@ run_dos() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_dos" ${RUNSCRIPT_BASE}_dos
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
+        sed -i 's|[/_][^[:space:]]*||g' POSCAR
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
         sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
     fi
