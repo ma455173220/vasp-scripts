@@ -195,6 +195,7 @@ update_runscript() {
     local runscript_file=$1
     local jobname=$2
     local kpoints_file=$3
+    local pbs_name=$4
     
     # Determine VASP_EXE based on k-mesh in KPOINTS file
     local vasp_exe="vasp_std"  # default
@@ -234,6 +235,16 @@ update_runscript() {
     else
         echo "⚠️ VASP_EXE not found in $runscript_file"
     fi
+
+    # Update PBS job name (-N parameter)
+    if grep -q "^#PBS -N" "$runscript_file"; then
+        sed -i "s/^#PBS -N.*/#PBS -N ${PREFIX}/" "$runscript_file"
+        echo "🔧 PBS job name (-N) set to ${PREFIX} in $runscript_file"
+    else
+        # Insert after the first line (#!/bin/bash)
+        sed -i "2i#PBS -N ${PREFIX}" "$runscript_file"
+        echo "➕ PBS job name (-N ${PREFIX}) added to $runscript_file"
+    fi
 }
 
 # ===== User prompts =====
@@ -271,7 +282,7 @@ if [ "$PERFORM_STEP0" = true ]; then
     mv KPOINTS KPOINTS_step0
     echo "🔧 KPOINTS_step0 generated (Gamma-only)."
     cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step0"
-    update_runscript "${RUNSCRIPT_BASE}_step0" "00" "KPOINTS_step0"
+    update_runscript "${RUNSCRIPT_BASE}_step0" "00" "KPOINTS_step0" "$PREFIX"
     echo "✅ Step0 files created for gamma-only pre-optimization."
 fi
 
@@ -282,7 +293,7 @@ echo -e "102\n1\n0.04\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_step1
 echo "🔧 KPOINTS_step1 generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step1"
-update_runscript "${RUNSCRIPT_BASE}_step1" "01" "KPOINTS_step1"
+update_runscript "${RUNSCRIPT_BASE}_step1" "01" "KPOINTS_step1" "$PREFIX"
 
 # ===== Step 2 =====
 separator "STEP 2: Generating INCAR_step2"
@@ -292,7 +303,7 @@ echo -e "102\n1\n0.04\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_step2
 echo "🔧 KPOINTS_step2 generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step2"
-update_runscript "${RUNSCRIPT_BASE}_step2" "02" "KPOINTS_step2"
+update_runscript "${RUNSCRIPT_BASE}_step2" "02" "KPOINTS_step2" "$PREFIX"
 
 # ===== Step 3 =====
 separator "STEP 3: Generating INCAR_scf"
@@ -339,7 +350,7 @@ echo -e "102\n1\n0.03\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_scf
 echo "🔧 KPOINTS_scf generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_scf"
-update_runscript "${RUNSCRIPT_BASE}_scf" "03" "KPOINTS_scf"
+update_runscript "${RUNSCRIPT_BASE}_scf" "03" "KPOINTS_scf" "$PREFIX"
 
 # ===== Step 6 =====
 separator "STEP 6: Generating INCAR_band"
@@ -355,7 +366,7 @@ echo -e "303\n" | vaspkit > /dev/null 2>&1
 mv KPATH.in KPOINTS_band
 echo "🔧 KPOINTS_band generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_band"
-update_runscript "${RUNSCRIPT_BASE}_band" "04" "KPOINTS_band"
+update_runscript "${RUNSCRIPT_BASE}_band" "04" "KPOINTS_band" "$PREFIX"
 
 # ===== Step 8 =====
 separator "STEP 8: Generating INCAR_dos"
@@ -368,7 +379,7 @@ echo -e "102\n1\n0.02\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_dos
 echo "🔧 KPOINTS_dos generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_dos"
-update_runscript "${RUNSCRIPT_BASE}_dos" "05" "KPOINTS_dos"
+update_runscript "${RUNSCRIPT_BASE}_dos" "05" "KPOINTS_dos" "$PREFIX"
 
 # ===== Generate workflow execution script =====
 separator "Generating workflow execution script: $WORKFLOW_SCRIPT"
