@@ -53,20 +53,56 @@ print_dos (){
     echo -e "116" | vaspkit > LDOS_log
 }
 
+check_completion() {
+    local outcar_file="$PWD/OUTCAR"
+    local mode_check=`grep -v "^#" INCAR | grep "IBRION" | sed 's/.*IBRION[[:space:]]*=[[:space:]]*\([0-9-][0-9]*\).*/\1/' | tail -1`
 
-final_act (){
-    if [ -e AECCAR2 ] ; then
-        bader_cal
+    if [[ ! -f "$outcar_file" ]]; then
+        echo "$(date): Job failed - OUTCAR not found in $PWD" >> ~/vasp_fail_log
+        return 1
     fi
 
-    print_band_gap
-    print_dos
+    if ! grep -q "Total CPU time used" "$outcar_file"; then
+        echo "$(date): Job failed - Job did not complete normally in $PWD" >> ~/vasp_fail_log
+        return 1
+    fi
+
+    if [[ "$mode_check" == "5" ]]; then
+        # IBRION = 5 case
+        if ! grep -q "EDIFF is reached" "$outcar_file" || ! grep -q "Total CPU time used" "$outcar_file"; then
+            echo "$(date): Job failed - IBRION=5 did not meet criteria in $PWD" >> ~/vasp_fail_log
+            return 1
+        fi
+    elif [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
+        # Optimization job
+        if ! grep -q "reached required accuracy" "$outcar_file" || ! grep -q "EDIFF is reached" "$outcar_file"; then
+            echo "$(date): Job failed - Optimization did not converge in $PWD" >> ~/vasp_fail_log
+            return 1
+        fi
+    else
+        # SCF job
+        if ! grep -q "EDIFF is reached" "$outcar_file"; then
+            echo "$(date): Job failed - SCF did not converge in $PWD" >> ~/vasp_fail_log
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+final_act (){
     MODE_CHECK=`grep "^IBRION" INCAR | awk -F ' '  '{print $3}'`
     if [ -z "$MODE_CHECK" ] || [ "$MODE_CHECK" != "-1" ]; then
     	rename_files
     fi
     remove_files
     log_report
+    check_completion || exit 1
+    print_band_gap
+    print_dos
+    if [ -e AECCAR2 ] ; then
+        bader_cal
+    fi
     exit
 
 }
