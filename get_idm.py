@@ -1,4 +1,4 @@
-#!/apps/python3/3.10.0/bin/python3
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 # Print the initial information block

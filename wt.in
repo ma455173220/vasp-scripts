@@ -1,0 +1,117 @@
+&TB_FILE
+Hrfile = wannier90_hr.dat
+Package = 'QE'
+/
+
+
+&CONTROL
+!> bulk band structure calculation flag
+BulkBand_calc         = F
+BulkFS_calc           = F
+BulkGap_cube_calc     = F
+BulkGap_plane_calc    = F
+AHC_calc              = F
+SHC_calc              = T
+SHC_calc_new          = T
+SHC_calc_td_p_one     = T 
+SHC_calc_td_p_two     = T
+SlabBand_calc         = F
+WireBand_calc         = F
+SlabSS_calc           = F
+SlabArc_calc          = F
+SlabSpintexture_calc  = F
+wanniercenter_calc    = F
+BerryPhase_calc       = F
+BerryCurvature_calc   = F
+/
+
+&SYSTEM
+! NSLAB = 10 
+! NumOccupied = 8        ! NumOccupied
+SOC = 1                 ! soc
+E_FERMI = 9.13624053
+! Bx= 0, By= 0, Bz= 0     ! Bx By Bz
+! surf_onsite= 0.0        ! surf_onsite
+/
+
+&PARAMETERS
+Eta_Arc = 0.01     ! infinite small value, like brodening 
+! E_arc = 0.00         ! energy for calculate Fermi Arc
+OmegaNum = 251      ! omega number       
+OmegaMin = -2     ! energy interval
+OmegaMax =  0.5     ! energy interval
+Nk1 = 101           ! number k points 
+Nk2 = 101           ! number k points 
+Nk3 = 101            ! number k points 
+! NP = 4              ! number of principle layers
+! Gap_threshold = 0.002 ! threshold for GapCube output
+/
+
+LATTICE
+Angstrom
+5.670000 0.000000 0.000000
+-2.835000 4.910364 0.000000
+0.000000 0.000000 4.530000
+
+ATOM_POSITIONS
+8
+Direct
+Mn 0.83300 0.66600 0.25000
+Mn 0.16700 0.33400 0.75000
+Mn 0.33400 0.16700 0.25000
+Mn 0.66600 0.83300 0.75000
+Mn 0.83300 0.16700 0.25000
+Mn 0.16700 0.83300 0.75000
+Sn 0.33333 0.66667 0.25000
+Sn 0.66667 0.33333 0.75000
+
+PROJECTORS
+ 5 5 5 5 5 5 3 3           ! number of projectors
+Mn dz2 dxz dyz dx2-y2 dxy 
+Mn dz2 dxz dyz dx2-y2 dxy
+Mn dz2 dxz dyz dx2-y2 dxy
+Mn dz2 dxz dyz dx2-y2 dxy
+Mn dz2 dxz dyz dx2-y2 dxy
+Mn dz2 dxz dyz dx2-y2 dxy
+Sn pz px py
+Sn pz px py
+
+! SURFACE            ! See doc for details
+!  1  0  0
+!  0  1  0
+!  0  0  1
+! 
+! KPATH_BULK            ! k point path
+! 5              ! number of k line only for bulk band
+! W      0.50000    0.24576    0.75424    T      0.50000    0.50000    0.50000    
+! T      0.50000    0.50000    0.50000    U      0.75424    0.37288    0.37288    
+! U      0.75424    0.37288    0.37288    L      0.50000    0.00000    0.00000    
+! L      0.50000    0.00000    0.00000    G      0.00000    0.00000    0.00000    
+! G       0.0  0.0  0.0  P -0.08592965     -0.08592965      0.32060302
+! 
+! KPATH_SLAB
+! 2        ! numker of k line for 2D case
+! K -0.5 0.0 G 0.0 0.0  ! k path for 2D case
+! G 0.0 0.0  K 0.5 0.0
+! 
+! KPLANE_SLAB
+! -0.5 -0.5      ! Original point for 2D k plane
+!  1.0  0.0      ! The first vector to define 2D k plane 
+!  0.0  1.0      ! The second vector to define 2D k plane  for arc plots
+! 
+! KPLANE_BULK
+! -0.50 -0.50  0.00   ! Original point for 3D k plane 
+!  1.00  0.00  0.00   ! The first vector to define 3d k space plane
+!  0.00  1.00  0.00   ! The second vector to define 3d k space plane
+
+
+KCUBE_BULK
+-0.0     -0.0      0.   ! Original point for 3D k plane 
+ 1.0  0.00  0.00   ! The first vector to define 3d k space plane
+ 0.00  1.0  0.00   ! The second vector to define 3d k space plane
+ 0.00  0.00   1.0   ! The third vector to define 3d k cube
+
+! WANNIER_CENTRES     ! copy from wannier90.wout
+! Cartesian
+!     0.045799 -0.044350 -0.003225
+

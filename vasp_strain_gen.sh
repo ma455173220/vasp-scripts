@@ -207,12 +207,12 @@ copy_vasp_files() {
     fi
     
     # Copy workflow generator script if it exists
-    if [ -f "vasp_workflow_input_generator.sh" ]; then
-        cp "vasp_workflow_input_generator.sh" "$target_dir/"
-        print_info "  Copied vasp_workflow_input_generator.sh"
+    if [ -f "vasp_workflow_input_generator_setonix.sh" ]; then
+        cp "vasp_workflow_input_generator_setonix.sh" "$target_dir/"
+        print_info "  Copied vasp_workflow_input_generator_setonix.sh"
         ((files_copied++))
     else
-        print_warning "  vasp_workflow_input_generator.sh not found"
+        print_warning "  vasp_workflow_input_generator_setonix.sh not found"
     fi
     
     return 0
@@ -236,7 +236,7 @@ run_workflow_generator() {
     {
         echo "$workflow_prefix"  # Enter prefix
         echo "y"                 # Choose gamma-only pre-optimization
-    } | sh ./vasp_workflow_input_generator.sh > workflow_generator.log 2>&1
+    } | sh ./vasp_workflow_input_generator_setonix.sh > workflow_generator.log 2>&1
     
     # Check if workflow script was generated
     local workflow_script="${workflow_prefix}.sh"
@@ -342,8 +342,8 @@ if ! check_file "POSCAR"; then
     exit 1
 fi
 
-if ! check_file "vasp_workflow_input_generator.sh"; then
-    print_error "vasp_workflow_input_generator.sh not found!"
+if ! check_file "vasp_workflow_input_generator_setonix.sh"; then
+    print_error "vasp_workflow_input_generator_setonix.sh not found!"
     print_info "This script is required for automatic workflow setup."
     exit 1
 fi
@@ -559,7 +559,7 @@ if [ "$auto_workflow" = true ]; then
     echo "  3. All calculations are running in background"
 else
     echo "  1. Enter each folder: cd strain_*/"
-    echo "  2. Run workflow generator: sh ./vasp_workflow_input_generator.sh"
+    echo "  2. Run workflow generator: sh ./vasp_workflow_input_generator_setonix.sh"
     echo "  3. Start calculation: nohup ./${workflow_prefix}_*.sh &"
 fi
 echo "  4. Use 'ls strain_*/' to check all generated folders"

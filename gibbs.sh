@@ -81,6 +81,23 @@ echo "已将NSW改为1"
 sed -i 's/^IOPT = 7 ; POTIM = 0 ; IBRION = 3/#IOPT = 7 ; POTIM = 0 ; IBRION = 3/' INCAR
 echo "已注释掉优化器设置行"
 
+# 注释掉NEB相关参数（IMAGES, SPRING, LCLIMB, ICHAIN, IOPT开头的行）
+sed -i 's/^IMAGES\s*=/#IMAGES =/' INCAR
+sed -i 's/^SPRING\s*=/#SPRING =/' INCAR
+sed -i 's/^LCLIMB\s*=/#LCLIMB =/' INCAR
+sed -i 's/^ICHAIN\s*=/#ICHAIN =/' INCAR
+sed -i 's/^IOPT\s*=/#IOPT =/' INCAR
+echo "已注释掉NEB相关参数（IMAGES, SPRING, LCLIMB, ICHAIN, IOPT）"
+
+# 修改EDIFF为1E-07
+if grep -q "^EDIFF\s*=" INCAR; then
+    sed -i 's/^EDIFF\s*=.*/EDIFF = 1E-07/' INCAR
+    echo "已将EDIFF改为1E-07"
+else
+    echo "EDIFF = 1E-07" >> INCAR
+    echo "已添加EDIFF = 1E-07"
+fi
+
 # 7. 设置Gibbs计算参数
 echo "设置Gibbs计算参数..."
 
@@ -105,13 +122,28 @@ else
     echo "NFREE = 2" >> INCAR
 fi
 
-echo "已设置IBRION = 5, POTIM = 0.015, NFREE = 2"
+# 设置或修改NWRITE为3
+if grep -q "^NWRITE\s*=" INCAR; then
+    sed -i 's/^NWRITE\s*=.*/NWRITE = 3/' INCAR
+else
+    echo "NWRITE = 3" >> INCAR
+fi
+
+echo "已设置IBRION = 5, POTIM = 0.015, NFREE = 2, NWRITE = 3"
 
 # 8. 修改vasp_runscript中的VASP_EXE
 echo "修改vasp_runscript..."
 if [ -f "vasp_runscript" ]; then
     sed -i 's/VASP_EXE="vasp_std"/VASP_EXE="vasp_gam"/' vasp_runscript
     echo "已将VASP_EXE改为vasp_gam"
+    
+    # 修改SBATCH ntasks为128
+    sed -i 's/^#SBATCH --ntasks=[0-9]*/#SBATCH --ntasks=128/' vasp_runscript
+    echo "已将#SBATCH --ntasks改为128"
+    
+    # 修改SBATCH nodes为1
+    sed -i 's/^#SBATCH --nodes=[0-9]*/#SBATCH --nodes=1/' vasp_runscript
+    echo "已将#SBATCH --nodes改为1"
 else
     echo "警告: vasp_runscript文件不存在"
 fi
@@ -119,13 +151,16 @@ fi
 # 显示修改后的关键参数
 echo ""
 echo "=== INCAR关键参数检查 ==="
-grep -E "^(DIPOL|NSW|IBRION|POTIM|NFREE)" INCAR
+grep -E "^(DIPOL|NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
 echo ""
 echo "=== 被注释的行 ==="
 grep "^#IOPT = 7" INCAR
+grep "^#IMAGES\|^#SPRING\|^#LCLIMB\|^#ICHAIN\|^#IOPT" INCAR 2>/dev/null || echo "未找到被注释的NEB参数"
 echo ""
-echo "=== vasp_runscript中的VASP_EXE ==="
+echo "=== vasp_runscript中的关键设置 ==="
 grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "未找到VASP_EXE设置"
+grep "#SBATCH --ntasks=" vasp_runscript 2>/dev/null || echo "未找到ntasks设置"
+grep "#SBATCH --nodes=" vasp_runscript 2>/dev/null || echo "未找到nodes设置"
 echo ""
 
 echo "Gibbs计算设置完成！"
