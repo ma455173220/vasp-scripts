@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Vacancy Generation Script (Oxygen Vacancies) using pymatgen
 -----------------------------------------------------------

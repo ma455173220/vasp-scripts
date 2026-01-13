@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 from ase.io import read
 slab = read("POSCAR")
 com = slab.get_center_of_mass(scaled=True)

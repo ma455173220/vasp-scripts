@@ -1,4 +1,4 @@
-#!/home/561/hm1876/miniconda3/bin/python3
+#!/usr/bin/env python3
 import os
 import numpy as np
 import matplotlib.pyplot as plt

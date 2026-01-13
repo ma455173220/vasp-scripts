@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """
 A script which averages a CHGCAR  file in three direction to get charge center.
 User must specify filename in command line.
