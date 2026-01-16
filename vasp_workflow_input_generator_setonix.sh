@@ -416,11 +416,11 @@ EOL
 
 if [ "$PERFORM_STEP0" = true ]; then
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(0 1 2 3 5)
+RUN_STEPS=(0 1 2)
 EOL
 else
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(1 2 3 5)
+RUN_STEPS=(1 2)
 EOL
 fi
 
