@@ -108,7 +108,7 @@ file_editor (){
     echo "LORBIT =  11       #(PAW radii for projected DOS)" >> INCAR
     echo "NEDOS  =  2001         #(DOSCAR points)" >> INCAR
     # Generate denser kmesh
-    echo -e "102\n2\n0.03\n" | vaspkit > /dev/null
+    echo -e "102\n1\n0.03\n" | vaspkit > /dev/null
     read_kpoints
     sed -i "s/VASP_EXE=\"[^\"]*\"/VASP_EXE=\"$vasp_mod\"/" "$SUBMISSION_SCRIPT"
     grep -E "^NSW|^IBRION" INCAR | awk -F "#" '{print $1}'

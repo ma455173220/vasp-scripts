@@ -1,167 +1,229 @@
 #!/bin/bash
 
-# Gibbs计算设置脚本
-echo "开始设置Gibbs计算..."
+# Gibbs calculation setup script
+echo "============================================"
+echo "  VASP Gibbs/Frequency Calculation Setup"
+echo "============================================"
+echo ""
 
-# 1. 创建Gibbs文件夹
-if [ -d "Gibbs" ]; then
-    echo "警告: Gibbs文件夹已存在，将删除并重新创建"
-    rm -rf Gibbs
+# Ask for calculation type
+echo "Please select calculation type:"
+echo "  1) IDM frequency calculation (Improved Dimer Method - NWRITE=3)"
+echo "  2) Regular Gibbs calculation (NWRITE default)"
+echo ""
+read -p "Enter option (1 or 2): " calc_type
+
+# Set parameters based on selection
+case $calc_type in
+    1)
+        folder_name="Gibbs_IDM"
+        nwrite_value=3
+        calc_mode="IDM Frequency Calculation"
+        echo ""
+        echo ">>> Selected: IDM Frequency Calculation Mode"
+        ;;
+    2)
+        folder_name="Gibbs"
+        nwrite_value="default"
+        calc_mode="Regular Gibbs Calculation"
+        echo ""
+        echo ">>> Selected: Regular Gibbs Calculation Mode"
+        ;;
+    *)
+        echo "Error: Invalid option, please enter 1 or 2"
+        exit 1
+        ;;
+esac
+
+echo "Directory: $folder_name"
+echo "============================================"
+echo ""
+echo "Starting setup for $calc_mode..."
+
+# 1. Create Gibbs folder
+if [ -d "$folder_name" ]; then
+    echo "Warning: $folder_name folder already exists, will remove and recreate"
+    rm -rf "$folder_name"
 fi
-mkdir Gibbs
-echo "已创建Gibbs文件夹"
+mkdir "$folder_name"
+echo "Created $folder_name folder"
 
-# 2. 复制必要文件到Gibbs文件夹
+# 2. Copy required files to Gibbs folder
 required_files=("INCAR" "CONTCAR" "KPOINTS" "POTCAR" "vasp_runscript")
 for file in "${required_files[@]}"; do
     if [ -f "$file" ]; then
-        cp "$file" Gibbs/
-        echo "已复制 $file"
+        cp "$file" "$folder_name/"
+        echo "Copied $file"
     else
-        echo "错误: 找不到文件 $file"
+        echo "Error: File $file not found"
         exit 1
     fi
 done
 
-# 进入Gibbs文件夹
-cd Gibbs
+# Enter Gibbs folder
+cd "$folder_name"
 
-# 3. 将CONTCAR重命名为POSCAR
+# 3. Rename CONTCAR to POSCAR
 if [ -f "CONTCAR" ]; then
     mv CONTCAR POSCAR
-    echo "已将CONTCAR重命名为POSCAR"
+    echo "Renamed CONTCAR to POSCAR"
 else
-    echo "错误: CONTCAR文件不存在"
+    echo "Error: CONTCAR file does not exist"
     exit 1
 fi
 
-# 生成gamma点KPOINTS文件
-echo "生成gamma点KPOINTS..."
+# Generate gamma-point KPOINTS file
+echo "Generating gamma-point KPOINTS..."
 echo -e "102\n2\n0" | vaspkit > /dev/null 2>&1
 if [ -f "KPOINTS" ]; then
-    echo "已生成gamma点KPOINTS文件"
+    echo "Generated gamma-point KPOINTS file"
 else
-    echo "警告: vaspkit可能未成功生成KPOINTS文件"
+    echo "Warning: vaspkit may not have successfully generated KPOINTS file"
 fi
 
-# 4. 运行center-of-mass.py获取质心坐标
-echo "运行center-of-mass.py计算质心..."
+# 4. Run center-of-mass.py to get center of mass coordinates
+echo "Running center-of-mass.py to calculate center of mass..."
 
-# 运行center-of-mass.py并提取质心坐标
+# Run center-of-mass.py and extract center of mass coordinates
 output=$(center-of-mass.py POSCAR)
 echo "$output"
 
-# 提取[]内的内容作为dipol变量
+# Extract content within [] as dipol variable
 dipol=$(echo "$output" | grep -o '\[.*\]' | sed 's/\[//g' | sed 's/\]//g' | tr -s ' ')
 if [ -z "$dipol" ]; then
-    echo "错误: 无法从center-of-mass.py输出中提取质心坐标"
+    echo "Error: Cannot extract center of mass coordinates from center-of-mass.py output"
     exit 1
 fi
-echo "提取的质心坐标: $dipol"
+echo "Extracted center of mass coordinates: $dipol"
 
-# 5. 修改INCAR文件中的DIPOL值
-echo "修改INCAR文件..."
+# 5. Modify DIPOL value in INCAR file
+echo "Modifying INCAR file..."
 if [ -f "INCAR" ]; then
-    # 只修改DIPOL行（不影响LDIPOL和IDIPOL）
+    # Only modify DIPOL line (not affecting LDIPOL and IDIPOL)
     sed -i "s/^DIPOL\s*=.*/DIPOL = $dipol/" INCAR
-    echo "已更新DIPOL = $dipol"
+    echo "Updated DIPOL = $dipol"
 else
-    echo "错误: INCAR文件不存在"
+    echo "Error: INCAR file does not exist"
     exit 1
 fi
 
-# 6. 修改NSW和注释优化相关参数
-echo "修改结构优化相关参数..."
+# 6. Modify NSW and comment out optimization-related parameters
+echo "Modifying structure optimization parameters..."
 
-# 将NSW改为1
+# Change NSW to 1
 sed -i 's/NSW\s*=\s*[0-9]*/NSW = 1/' INCAR
-echo "已将NSW改为1"
+echo "Changed NSW to 1"
 
-# 注释掉IOPT = 7 ; POTIM = 0 ; IBRION = 3这一整行
+# Comment out the entire line: IOPT = 7 ; POTIM = 0 ; IBRION = 3
 sed -i 's/^IOPT = 7 ; POTIM = 0 ; IBRION = 3/#IOPT = 7 ; POTIM = 0 ; IBRION = 3/' INCAR
-echo "已注释掉优化器设置行"
+echo "Commented out optimizer setting line"
 
-# 注释掉NEB相关参数（IMAGES, SPRING, LCLIMB, ICHAIN, IOPT开头的行）
+# Comment out NEB-related parameters (lines starting with IMAGES, SPRING, LCLIMB, ICHAIN, IOPT)
 sed -i 's/^IMAGES\s*=/#IMAGES =/' INCAR
 sed -i 's/^SPRING\s*=/#SPRING =/' INCAR
 sed -i 's/^LCLIMB\s*=/#LCLIMB =/' INCAR
 sed -i 's/^ICHAIN\s*=/#ICHAIN =/' INCAR
 sed -i 's/^IOPT\s*=/#IOPT =/' INCAR
-echo "已注释掉NEB相关参数（IMAGES, SPRING, LCLIMB, ICHAIN, IOPT）"
+echo "Commented out NEB-related parameters (IMAGES, SPRING, LCLIMB, ICHAIN, IOPT)"
 
-# 修改EDIFF为1E-07
+# Modify EDIFF to 1E-07
 if grep -q "^EDIFF\s*=" INCAR; then
     sed -i 's/^EDIFF\s*=.*/EDIFF = 1E-07/' INCAR
-    echo "已将EDIFF改为1E-07"
+    echo "Changed EDIFF to 1E-07"
 else
     echo "EDIFF = 1E-07" >> INCAR
-    echo "已添加EDIFF = 1E-07"
+    echo "Added EDIFF = 1E-07"
 fi
 
-# 7. 设置Gibbs计算参数
-echo "设置Gibbs计算参数..."
+# 7. Set Gibbs calculation parameters
+echo "Setting Gibbs calculation parameters..."
 
-# 设置或修改IBRION为5
+# Set or modify IBRION to 5
 if grep -q "^IBRION\s*=" INCAR; then
     sed -i 's/^IBRION\s*=.*/IBRION = 5/' INCAR
 else
     echo "IBRION = 5" >> INCAR
 fi
 
-# 设置或修改POTIM为0.015
+# Set or modify POTIM to 0.015
 if grep -q "^POTIM\s*=" INCAR; then
     sed -i 's/^POTIM\s*=.*/POTIM = 0.015/' INCAR
 else
     echo "POTIM = 0.015" >> INCAR
 fi
 
-# 设置或修改NFREE为2
+# Set or modify NFREE to 2
 if grep -q "^NFREE\s*=" INCAR; then
     sed -i 's/^NFREE\s*=.*/NFREE = 2/' INCAR
 else
     echo "NFREE = 2" >> INCAR
 fi
 
-# 设置或修改NWRITE为3
-if grep -q "^NWRITE\s*=" INCAR; then
-    sed -i 's/^NWRITE\s*=.*/NWRITE = 3/' INCAR
+# Handle NWRITE based on calculation type
+if [ "$nwrite_value" = "default" ]; then
+    # For regular Gibbs calculation, remove NWRITE line if it exists
+    if grep -q "^NWRITE\s*=" INCAR; then
+        sed -i '/^NWRITE\s*=/d' INCAR
+        echo "Removed NWRITE (using default value)"
+    else
+        echo "NWRITE not found in INCAR (will use default value)"
+    fi
 else
-    echo "NWRITE = 3" >> INCAR
+    # For IDM calculation, set NWRITE = 3
+    if grep -q "^NWRITE\s*=" INCAR; then
+        sed -i "s/^NWRITE\s*=.*/NWRITE = $nwrite_value/" INCAR
+    else
+        echo "NWRITE = $nwrite_value" >> INCAR
+    fi
+    echo "Set NWRITE = $nwrite_value (for IDM frequency analysis)"
 fi
 
-echo "已设置IBRION = 5, POTIM = 0.015, NFREE = 2, NWRITE = 3"
+echo "Set IBRION = 5, POTIM = 0.015, NFREE = 2"
 
-# 8. 修改vasp_runscript中的VASP_EXE
-echo "修改vasp_runscript..."
+# 8. Modify VASP_EXE in vasp_runscript
+echo "Modifying vasp_runscript..."
 if [ -f "vasp_runscript" ]; then
     sed -i 's/VASP_EXE="vasp_std"/VASP_EXE="vasp_gam"/' vasp_runscript
-    echo "已将VASP_EXE改为vasp_gam"
+    echo "Changed VASP_EXE to vasp_gam"
     
-    # 修改SBATCH ntasks为128
+    # Modify SBATCH ntasks to 128
     sed -i 's/^#SBATCH --ntasks=[0-9]*/#SBATCH --ntasks=128/' vasp_runscript
-    echo "已将#SBATCH --ntasks改为128"
+    echo "Changed #SBATCH --ntasks to 128"
     
-    # 修改SBATCH nodes为1
+    # Modify SBATCH nodes to 1
     sed -i 's/^#SBATCH --nodes=[0-9]*/#SBATCH --nodes=1/' vasp_runscript
-    echo "已将#SBATCH --nodes改为1"
+    echo "Changed #SBATCH --nodes to 1"
 else
-    echo "警告: vasp_runscript文件不存在"
+    echo "Warning: vasp_runscript file does not exist"
 fi
 
-# 显示修改后的关键参数
+# Display modified key parameters
 echo ""
-echo "=== INCAR关键参数检查 ==="
+echo "============================================"
+echo "  Configuration Summary"
+echo "============================================"
+echo "Calculation Mode: $calc_mode"
+echo "Output Directory: $folder_name"
+echo ""
+echo "=== Key INCAR Parameters ==="
 grep -E "^(DIPOL|NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
+if [ "$nwrite_value" != "default" ]; then
+    grep "^NWRITE" INCAR
+else
+    echo "NWRITE = (default - not specified)"
+fi
 echo ""
-echo "=== 被注释的行 ==="
+echo "=== Commented Lines ==="
 grep "^#IOPT = 7" INCAR
-grep "^#IMAGES\|^#SPRING\|^#LCLIMB\|^#ICHAIN\|^#IOPT" INCAR 2>/dev/null || echo "未找到被注释的NEB参数"
+grep "^#IMAGES\|^#SPRING\|^#LCLIMB\|^#ICHAIN\|^#IOPT" INCAR 2>/dev/null || echo "No commented NEB parameters found"
 echo ""
-echo "=== vasp_runscript中的关键设置 ==="
-grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "未找到VASP_EXE设置"
-grep "#SBATCH --ntasks=" vasp_runscript 2>/dev/null || echo "未找到ntasks设置"
-grep "#SBATCH --nodes=" vasp_runscript 2>/dev/null || echo "未找到nodes设置"
+echo "=== Key Settings in vasp_runscript ==="
+grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "VASP_EXE setting not found"
+grep "#SBATCH --ntasks=" vasp_runscript 2>/dev/null || echo "ntasks setting not found"
+grep "#SBATCH --nodes=" vasp_runscript 2>/dev/null || echo "nodes setting not found"
 echo ""
-
-echo "Gibbs计算设置完成！"
-echo "请检查Gibbs文件夹中的文件，然后运行vasp_runscript开始计算。"
+echo "============================================"
+echo "Setup Complete!"
+echo "============================================"
+echo "Please check the files in $folder_name folder,"
+echo "then run vasp_runscript to start the calculation."
