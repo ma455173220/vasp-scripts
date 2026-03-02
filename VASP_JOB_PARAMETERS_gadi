@@ -6,7 +6,7 @@ BACKUP_INPUT_FILES="INCAR POSCAR"
 
 job_auto_submission () {
 	FUNCTION_CHOSEN=`grep "\.T\." VASP_AUTO_SUBMISSION |  awk -F '=|#' '{print $2}'`
-	FUNCTION_CHOSEN_NO_SPACE=`echo $FUNCTION_CHOSEN`
+		FUNCTION_CHOSEN_NO_SPACE=`echo $FUNCTION_CHOSEN`
 	if [ "$FUNCTION_CHOSEN" ] ; then
 		sh /home/561/hm1876/vasp_scripts_self_created/${FUNCTION_CHOSEN_NO_SPACE}.sh 1> /dev/null
 		sed -i 's/\.T\./\.F\./' VASP_AUTO_SUBMISSION
@@ -23,39 +23,46 @@ bader_cal (){
 }
 
 log_report (){
-
-	echo -e "\n------------------------------------------------------" >> ~/vasp_job_log
-	echo -e "Job finished at \c" >> ~/vasp_job_log && date >> ~/vasp_job_log
-	echo -e "PATH: $PBS_O_WORKDIR" >> ~/vasp_job_log
-	echo -e "------------------------------------------------------" >> ~/vasp_job_log
-
+    local status="${1:-SUCCESS}"   # 默认成功，失败时传入 "FAILED"
+    echo -e "\n------------------------------------------------------" >> ~/vasp_job_log
+    if [[ "$status" == "FAILED" ]]; then
+        echo -e "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
+        echo -e "!!                                                  !!" >> ~/vasp_job_log
+        echo -e "!!                  JOB FAILED !!!                  !!" >> ~/vasp_job_log
+        echo -e "!!                                                  !!" >> ~/vasp_job_log
+        echo -e "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
+    fi
+    echo -e "Job finished at \c" >> ~/vasp_job_log && date >> ~/vasp_job_log
+    echo -e "PATH: $PBS_O_WORKDIR">> ~/vasp_job_log
+    echo -e "STATUS: ${status}" >> ~/vasp_job_log
+    echo -e "------------------------------------------------------" >> ~/vasp_job_log
 }
 
 backup_input_files () {                               
-        for ii in $BACKUP_INPUT_FILES ; do       
-                cp $ii ${JOBNAME}_${ii}         
-        done                                    
-        # - exit the script                     
+	for ii in $BACKUP_INPUT_FILES ; do       
+		cp $ii ${JOBNAME}_${ii}         
+	done                                    
+	# - exit the script                     
 }                                               
 
 rename_files () {
-#        for i in $MOVE_RENAME_FILES ; do
-#                mv $i ${JOBNAME}_${i}
-#        done
-        for ii in $COPY_RENAME_FILES ; do
-                cp $ii ${JOBNAME}_${ii}
-        done
+	#        for i in $MOVE_RENAME_FILES ; do
+	#                mv $i ${JOBNAME}_${i}
+	#        done
+	for ii in $COPY_RENAME_FILES ; do
+		cp $ii ${JOBNAME}_${ii}
+	done
 	if [ -s CONTCAR ] ; then
 		cp CONTCAR POSCAR
 	fi
-        # - exit the script
+	# - exit the script
 }
 
 remove_files (){
 
-        for ii in $REMOVE_RENAME_FILES ; do
+	for ii in $REMOVE_RENAME_FILES ; do
 		rm $ii
-        done
+	done
 
 
 }
@@ -82,7 +89,7 @@ CHECK_AUTO_STOP (){
 	COUNTER_MAX=288
 	while [ $COUNTER -le $COUNTER_MAX ]; do
 		if [ -a AUTOSTOP ] ; then
-		        AUTO_STOP &
+			AUTO_STOP &
 			exit
 		else
 			sleep 600s
@@ -101,34 +108,34 @@ AUTO_STOP (){
 }
 
 check_completion() {
-    local outcar_file="$PWD/OUTCAR"
-    local mode_check=`grep -v "^#" INCAR | grep "IBRION" | sed 's/.*IBRION[[:space:]]*=[[:space:]]*\([0-9-][0-9]*\).*/\1/' | tail -1`
+	local outcar_file="$PWD/OUTCAR"
+	local mode_check=`grep -v "^#" INCAR | grep "IBRION" | sed 's/.*IBRION[[:space:]]*=[[:space:]]*\([0-9-][0-9]*\).*/\1/' | tail -1`
 
-    if [[ ! -f "$outcar_file" ]]; then
-        echo "$(date): Job failed - OUTCAR not found in $PWD" >> ~/vasp_fail_log
-        return 1
-    fi
+	if [[ ! -f "$outcar_file" ]]; then
+		echo "$(date): Job failed - OUTCAR not found in $PWD" >> ~/vasp_fail_log
+		return 1
+	fi
 
-    if ! grep -q "Total CPU time used" "$outcar_file"; then
-        echo "$(date): Job failed - Job did not complete normally in $PWD" >> ~/vasp_fail_log
-        return 1
-    fi
+	if ! grep -q "Total CPU time used" "$outcar_file"; then
+		echo "$(date): Job failed - Job did not complete normally in $PWD" >> ~/vasp_fail_log
+		return 1
+	fi
 
-    if [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
-        # Optimization job
-        if ! grep -q "reached required accuracy" "$outcar_file" || ! grep -q "EDIFF is reached" "$outcar_file"; then
-            echo "$(date): Job failed - Optimization did not converge in $PWD" >> ~/vasp_fail_log
-            return 1
-        fi
-    else
-        # SCF job
-        if ! grep -q "EDIFF is reached" "$outcar_file"; then
-            echo "$(date): Job failed - SCF did not converge in $PWD" >> ~/vasp_fail_log
-            return 1
-        fi
-    fi
+	if [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
+		# Optimization job
+		if ! grep -q "reached required accuracy" "$outcar_file" || ! grep -q "EDIFF is reached" "$outcar_file"; then
+			echo "$(date): Job failed - Optimization did not converge in $PWD" >> ~/vasp_fail_log
+			return 1
+		fi
+	else
+		# SCF job
+		if ! grep -q "EDIFF is reached" "$outcar_file"; then
+			echo "$(date): Job failed - SCF did not converge in $PWD" >> ~/vasp_fail_log
+			return 1
+		fi
+	fi
 
-    return 0
+	return 0
 }
 
 
@@ -137,16 +144,20 @@ final_act (){
 	if [ $MODE_CHECK -ne -1 ] ; then
 		rename_files
 	fi
-    rename_files
+	rename_files
 	remove_files
-	log_report
-    check_completion || exit 1
-    if [ -e AECCAR2 ] ; then
-        bader_cal
-    fi
+	if check_completion; then
+		log_report "SUCCESS"
+	else
+		log_report "FAILED"
+		exit 1
+	fi
+	if [ -e AECCAR2 ] ; then
+		bader_cal
+	fi
 
-    print_band_gap
-    print_dos
+	print_band_gap
+	print_dos
 
 	if [ -e VASP_AUTO_SUBMISSION ] ; then
 		job_auto_submission
