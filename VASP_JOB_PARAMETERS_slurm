@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REMOVE_RENAME_FILES="CHG PCDAT REPORT" # vaspout.h5
+REMOVE_RENAME_FILES="CHG REPORT" # vaspout.h5
 COPY_RENAME_FILES="CONTCAR OSZICAR OUTCAR XDATCAR EIGENVAL" 
 BACKUP_INPUT_FILES="INCAR POSCAR"
 
@@ -13,13 +13,13 @@ bader_cal (){
 log_report (){
     local status="${1:-SUCCESS}"   # 默认成功，失败时传入 "FAILED"
     echo -e "\n------------------------------------------------------" >> ~/vasp_job_log
-    if [[ "$status" == "FAILED" ]]; then
-        echo -e "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
-        echo -e "!!                                                  !!" >> ~/vasp_job_log
-        echo -e "!!                  JOB FAILED !!!                  !!" >> ~/vasp_job_log
-        echo -e "!!                                                  !!" >> ~/vasp_job_log
-        echo -e "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
-    fi
+    # if [[ "$status" == "FAILED" ]]; then
+    #     echo -e "\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
+    #     echo -e "!!                                                  !!" >> ~/vasp_job_log
+    #     echo -e "!!                  JOB FAILED !!!                  !!" >> ~/vasp_job_log
+    #     echo -e "!!                                                  !!" >> ~/vasp_job_log
+    #     echo -e "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >> ~/vasp_job_log
+    # fi
     echo -e "Job finished at \c" >> ~/vasp_job_log && date >> ~/vasp_job_log
     echo -e "PATH: ${SLURM_SUBMIT_DIR}" >> ~/vasp_job_log
     echo -e "STATUS: ${status}" >> ~/vasp_job_log

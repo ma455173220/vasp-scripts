@@ -1,23 +1,27 @@
 #!/bin/bash --login
 
 #SBATCH --job-name=name
-#SBATCH --account=pawsey0328
+#SBATCH --account=pawsey1237
 #SBATCH --partition=work
-#SBATCH --ntasks=128
+#SBATCH --ntasks-per-node=128
 #SBATCH --nodes=1
 #SBATCH --mem=230G      #Indicate the amount of memory per node when asking for share resources
 #SBATCH --time=24:00:00
 #SBATCH --output=output_%j.txt
 
-JOBNAME="01"
-VASP_EXE="vasp_std"
+JOBNAME="00"
+VASP_EXE="vasp_gam"
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/software/projects/pawsey0328/hma/lib
 
-source ~/VASP_JOB_PARAMETERS
+source /software/projects/pawsey0328/hma/scripts/vasp-scripts/VASP_JOB_PARAMETERS_slurm
 
 #Modules
+module unload gcc-native/14.2
+module swap pawseyenv/2025.08 pawseyenv/2024.05
 module load gcc/12.2.0
+module load libfabric/1.15.2.0
+
 # OpenBLAS
 export LD_LIBRARY_PATH=/software/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/openblas-0.3.24-n2a4fbqc4rpdjmefdmu5buetc2jf6nup/lib:$LD_LIBRARY_PATH
 
