@@ -6,19 +6,48 @@
 # energy from vasprun.xml (preferred) or OUTCAR.
 #
 # Usage (run from the calculation directory containing wannier90.wout):
-#   bash wt-input-generator.sh [--no-z2] [--soc 0]
+#   bash wt-input-generator.sh [-i template.in] [--no-z2] [--soc 0]
+#
+# Options:
+#   -i FILE     Use FILE as wt.in template instead of the embedded default
+#   --no-z2     Set Z2_3D_calc = F  (default: T)
+#   --soc N     Set SOC = N         (default: 1)
 
 set -euo pipefail
 
 TARGET_FOLDER="wanniertools"
 TARGET_HR="wannier90_hr.dat"
 TARGET_RUNSCRIPT="$HOME/wanniertools_runscript"
+TEMPLATE_IN="template.in"   # default; overridden by -i
+
+# --------------------------------------------------------------------------
+# Parse flags
+# --------------------------------------------------------------------------
+EXTRA_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i)
+            if [[ -z "${2-}" ]]; then
+                echo "Error: -i requires a file argument" >&2; exit 1
+            fi
+            TEMPLATE_IN="$2"; shift 2 ;;
+        -i*)
+            TEMPLATE_IN="${1#-i}"; shift ;;
+        *)
+            EXTRA_ARGS+=("$1"); shift ;;
+    esac
+done
 
 # --------------------------------------------------------------------------
 # Sanity check
 # --------------------------------------------------------------------------
 if [ ! -f "wannier90.wout" ]; then
     echo "Error: wannier90.wout not found in $(pwd)" >&2
+    exit 1
+fi
+
+if [[ "$TEMPLATE_IN" != "template.in" ]] && [ ! -f "$TEMPLATE_IN" ]; then
+    echo "Error: template file '$TEMPLATE_IN' not found" >&2
     exit 1
 fi
 
@@ -329,16 +358,93 @@ def read_projectors(win_path, atom_list):
     return '\n'.join(lines)
 
 
+# =============================================================================
+# Section-based replacement (for custom templates without placeholders)
+# Each function finds the relevant section by its keyword and replaces the
+# data lines that follow it, stopping at the next blank line.
+# =============================================================================
+
+def _replace_section_data(content, anchor, new_data_lines, stop_keywords=()):
+    """
+    Find the line matching `anchor` (stripped), then replace all non-blank
+    lines that follow it (up to the first blank line or a stop_keyword line)
+    with new_data_lines.
+    """
+    lines = content.splitlines(keepends=True)
+    out = []
+    i = 0
+    while i < len(lines):
+        out.append(lines[i])
+        if lines[i].strip() == anchor:
+            i += 1
+            # skip old data lines
+            while i < len(lines):
+                s = lines[i].strip()
+                if s == '' or any(s.startswith(kw) for kw in stop_keywords):
+                    break
+                i += 1
+            # insert new data
+            for dl in new_data_lines:
+                out.append(dl + '\n')
+            continue
+        i += 1
+    return ''.join(out)
+
+
+def replace_lattice(content, vectors):
+    """Replace the 3 lines after 'Angstrom'."""
+    return _replace_section_data(content, 'Angstrom', vectors)
+
+
+def replace_atom_positions(content, n_atoms, atoms):
+    """
+    Replace everything after 'ATOM_POSITIONS' up to the next blank line.
+    The block is: <n_atoms>\nDirect\n<atom lines...>
+    """
+    new_lines = [str(n_atoms), 'Direct'] + atoms
+    return _replace_section_data(content, 'ATOM_POSITIONS', new_lines)
+
+
+def replace_fermi(content, e_fermi):
+    """Replace E_FERMI = <anything> with the new value."""
+    return re.sub(r'(E_FERMI\s*=\s*).*', rf'\g<1>{e_fermi}', content)
+
+
+def replace_projectors(content, projectors_block):
+    """
+    Replace the PROJECTORS block (from the PROJECTORS line up to the next
+    blank line) with the new block.  If no PROJECTORS line exists, do nothing.
+    """
+    if 'PROJECTORS' not in content:
+        return content
+    # projectors_block already starts with 'PROJECTORS\n...'
+    # so we replace from the PROJECTORS line to the next blank line
+    new_lines = projectors_block.splitlines()[1:]  # skip the leading 'PROJECTORS' line
+    return _replace_section_data(
+        content, 'PROJECTORS', new_lines,
+        stop_keywords=['!', 'SURFACE', 'KPATH', 'KPLANE', 'KCUBE', 'WANNIER']
+    )
+
+
 def main():
-    wtin_path   = Path(sys.argv[1])
-    wout_path   = Path(sys.argv[2])
-    outcar_path = Path(sys.argv[3])
-    extra       = sys.argv[4:]
+    wtin_path     = Path(sys.argv[1])
+    wout_path     = Path(sys.argv[2])
+    outcar_path   = Path(sys.argv[3])
+    template_path = Path(sys.argv[4])
+    extra         = sys.argv[5:]
 
     z2  = '--no-z2' not in extra
     soc = 1
     if '--soc' in extra:
         soc = int(extra[extra.index('--soc') + 1])
+
+    # Load template: prefer template.in in the calc dir, fall back to embedded
+    if template_path.exists():
+        content = template_path.read_text()
+        print(f'Using template    : {template_path}')
+    else:
+        content = TEMPLATE
+        print('Using template    : <embedded default>')
 
     # wannier90.win is expected alongside wannier90.wout
     win_path = wout_path.with_suffix('.win')
@@ -371,12 +477,25 @@ def main():
         print(f"  Warning: could not parse projectors from {win_path} – "
               f"left as comment placeholder.")
 
-    content = TEMPLATE
-    content = content.replace('<<<LATTICE>>>',     '\n'.join(vectors))
-    content = content.replace('<<<N_ATOMS>>>',     str(n_atoms))
-    content = content.replace('<<<ATOM_COORDS>>>', '\n'.join(atoms))
-    content = content.replace('<<<E_FERMI>>>',     e_fermi)
-    content = content.replace('<<<PROJECTORS>>>', projectors_block)
+    # Apply parsed data to the template.
+    # Two strategies:
+    #   1. Placeholder substitution  – works when <<<...>>> markers are present
+    #      (always true for the embedded default template)
+    #   2. Section-based replacement – used as fallback when a custom template
+    #      has no placeholders (i.e. the user supplied a real wt.in)
+    use_placeholders = '<<<LATTICE>>>' in content
+
+    if use_placeholders:
+        content = content.replace('<<<LATTICE>>>',     '\n'.join(vectors))
+        content = content.replace('<<<N_ATOMS>>>',     str(n_atoms))
+        content = content.replace('<<<ATOM_COORDS>>>', '\n'.join(atoms))
+        content = content.replace('<<<E_FERMI>>>',     e_fermi)
+        content = content.replace('<<<PROJECTORS>>>', projectors_block)
+    else:
+        content = replace_lattice(content, vectors)
+        content = replace_atom_positions(content, n_atoms, atoms)
+        content = replace_fermi(content, e_fermi)
+        content = replace_projectors(content, projectors_block)
 
     if not z2:
         content = content.replace('Z2_3D_calc            = T',
@@ -393,4 +512,4 @@ def main():
 main()
 PYEOF
 
-python3 "$_PY" "$TARGET_FOLDER/wt.in" "wannier90.wout" "OUTCAR" "$@"
+python3 "$_PY" "$TARGET_FOLDER/wt.in" "wannier90.wout" "OUTCAR" "$TEMPLATE_IN" "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
