@@ -1,0 +1,23 @@
+#!/bin/bash --login
+
+#SBATCH --job-name=name
+#SBATCH --account=pawsey1237
+#SBATCH --partition=work
+#SBATCH --ntasks=128
+#SBATCH --nodes=1
+#SBATCH --mem=230G      #Indicate the amount of memory per node when asking for share resources
+#SBATCH --time=01:00:00
+#SBATCH --output=output_%j.txt
+
+#Modules
+module load gcc/12.2.0
+# OpenBLAS
+export LD_LIBRARY_PATH=/software/setonix/2024.05/software/linux-sles15-zen3/gcc-12.2.0/openblas-0.3.24-n2a4fbqc4rpdjmefdmu5buetc2jf6nup/lib:$LD_LIBRARY_PATH
+
+# Settings for MPI jobs
+export OMP_NUM_THREADS=1
+export MPICH_OFI_STARTUP_CONNECT=1
+export MPICH_OFI_VERBOSE=1
+export FI_CXI_DEFAULT_VNI=$(od -vAn -N4 -tu < /dev/urandom)
+
+srun -N $SLURM_JOB_NUM_NODES -n $SLURM_NTASKS -c $OMP_NUM_THREADS -m block:block:block /software/projects/pawsey0328/hma/apps/wannier_tools/bin/wt.x 
