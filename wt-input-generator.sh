@@ -85,7 +85,7 @@ from pathlib import Path
 TEMPLATE = """\
 &TB_FILE
 Hrfile = 'wannier90_hr.dat'
-Package = 'QE'
+Package = 'VASP'
 /
 
 
@@ -176,9 +176,7 @@ KCUBE_BULK           ! k-cube for Z2_3D_calc and BulkGap_cube_calc
  0.0   1.0   0.0     ! second spanning vector
  0.0   0.0   1.0     ! third spanning vector
 
-! WANNIER_CENTRES    ! paste Wannier centres from wannier90.wout if needed
-! Cartesian
-!   x1  y1  z1
+<<<WANNIER_CENTRES>>>
 """
 
 
@@ -426,6 +424,66 @@ def replace_projectors(content, projectors_block):
     )
 
 
+def replace_wannier_centres(content, centres_block):
+    """
+    Replace the WANNIER_CENTRES block in a custom template.
+    Looks for a 'WANNIER_CENTRES' line (possibly commented out as
+    '! WANNIER_CENTRES') and replaces the data lines that follow.
+    If not found, appends the block at the end of the file.
+    """
+    if 'WANNIER_CENTRES' not in content:
+        # Append at end
+        return content.rstrip() + '\n\n' + centres_block + '\n'
+    # centres_block starts with 'WANNIER_CENTRES\nCartesian\n...'
+    new_lines = centres_block.splitlines()[1:]  # skip leading 'WANNIER_CENTRES'
+    # Handle both commented ('! WANNIER_CENTRES') and uncommented anchors
+    for anchor in ('WANNIER_CENTRES', '! WANNIER_CENTRES'):
+        if anchor in content:
+            # Normalise the anchor line to uncommented form first
+            content = content.replace('! WANNIER_CENTRES', 'WANNIER_CENTRES', 1)
+            return _replace_section_data(content, 'WANNIER_CENTRES', new_lines)
+    return content
+
+
+def read_wannier_centres(wout_path):
+    """
+    Extract Cartesian Wannier centres from the *last* 'Final State' block
+    in wannier90.wout.
+
+    Returns a formatted WANNIER_CENTRES block string, e.g.:
+        WANNIER_CENTRES
+        Cartesian
+          -1.050495   0.517330   7.420661
+          ...
+    """
+    text = wout_path.read_text()
+
+    # Locate the last occurrence of 'Final State'
+    last_pos = text.rfind('Final State')
+    if last_pos == -1:
+        return None
+
+    centres = []
+    for line in text[last_pos:].splitlines():
+        # Match: WF centre and spread    N  ( x, y, z )   spread
+        m = re.match(
+            r'\s*WF centre and spread\s+\d+\s+\(\s*'
+            r'([\-\d.]+),\s*([\-\d.]+),\s*([\-\d.]+)\s*\)',
+            line
+        )
+        if m:
+            centres.append(f'  {m.group(1)}  {m.group(2)}  {m.group(3)}')
+        # Stop at 'Sum of centres' line
+        elif centres and 'Sum of centres' in line:
+            break
+
+    if not centres:
+        return None
+
+    lines = ['WANNIER_CENTRES', 'Cartesian'] + centres
+    return '\n'.join(lines)
+
+
 def main():
     wtin_path     = Path(sys.argv[1])
     wout_path     = Path(sys.argv[2])
@@ -477,6 +535,19 @@ def main():
         print(f"  Warning: could not parse projectors from {win_path} – "
               f"left as comment placeholder.")
 
+    wannier_centres_block = read_wannier_centres(wout_path)
+    if wannier_centres_block:
+        n_wf = wannier_centres_block.count('\n') - 1  # subtract header lines
+        print(f"  Wannier centres : {n_wf} WFs extracted from Final State block")
+    else:
+        wannier_centres_block = (
+            "! WANNIER_CENTRES    ! could not parse from wannier90.wout\n"
+            "! Cartesian\n"
+            "!   x1  y1  z1"
+        )
+        print(f"  Warning: could not parse Wannier centres from {wout_path} – "
+              f"left as comment placeholder.")
+
     # Apply parsed data to the template.
     # Two strategies:
     #   1. Placeholder substitution  – works when <<<...>>> markers are present
@@ -486,16 +557,18 @@ def main():
     use_placeholders = '<<<LATTICE>>>' in content
 
     if use_placeholders:
-        content = content.replace('<<<LATTICE>>>',     '\n'.join(vectors))
-        content = content.replace('<<<N_ATOMS>>>',     str(n_atoms))
-        content = content.replace('<<<ATOM_COORDS>>>', '\n'.join(atoms))
-        content = content.replace('<<<E_FERMI>>>',     e_fermi)
-        content = content.replace('<<<PROJECTORS>>>', projectors_block)
+        content = content.replace('<<<LATTICE>>>',          '\n'.join(vectors))
+        content = content.replace('<<<N_ATOMS>>>',          str(n_atoms))
+        content = content.replace('<<<ATOM_COORDS>>>',      '\n'.join(atoms))
+        content = content.replace('<<<E_FERMI>>>',          e_fermi)
+        content = content.replace('<<<PROJECTORS>>>',       projectors_block)
+        content = content.replace('<<<WANNIER_CENTRES>>>', wannier_centres_block)
     else:
         content = replace_lattice(content, vectors)
         content = replace_atom_positions(content, n_atoms, atoms)
         content = replace_fermi(content, e_fermi)
         content = replace_projectors(content, projectors_block)
+        content = replace_wannier_centres(content, wannier_centres_block)
 
     if not z2:
         content = content.replace('Z2_3D_calc            = T',
