@@ -35,6 +35,31 @@ case $calc_type in
         ;;
 esac
 
+# Ask whether to use dipole correction
+echo ""
+echo "Use dipole correction?"
+echo "  y) Yes - run center-of-mass.py and set DIPOL (for slabs/surfaces with vacuum)"
+echo "  n) No  - skip DIPOL setup and comment out DIPOL/LDIPOL/IDIPOL in INCAR"
+echo "          (for bulk, gas-phase molecules in box, or non-polar systems)"
+echo ""
+read -p "Enter option (y or n) [default: y]: " dipole_input
+dipole_input=${dipole_input:-y}
+
+case $dipole_input in
+    y|Y|yes|YES|Yes)
+        use_dipole=true
+        echo ">>> Dipole correction: ENABLED"
+        ;;
+    n|N|no|NO|No)
+        use_dipole=false
+        echo ">>> Dipole correction: DISABLED"
+        ;;
+    *)
+        echo "Error: Invalid option, please enter y or n"
+        exit 1
+        ;;
+esac
+
 echo "Directory: $folder_name"
 echo "============================================"
 echo ""
@@ -81,33 +106,46 @@ else
     echo "Warning: vaspkit may not have successfully generated KPOINTS file"
 fi
 
-# 4. Run center-of-mass.py to get center of mass coordinates
-echo "Running center-of-mass.py to calculate center of mass..."
+# 4. Handle DIPOL setting based on user choice
+if [ "$use_dipole" = true ]; then
+    # Run center-of-mass.py to get center of mass coordinates
+    echo "Running center-of-mass.py to calculate center of mass..."
+    output=$(center-of-mass.py POSCAR)
+    echo "$output"
 
-# Run center-of-mass.py and extract center of mass coordinates
-output=$(center-of-mass.py POSCAR)
-echo "$output"
+    # Extract content within [] as dipol variable
+    dipol=$(echo "$output" | grep -o '\[.*\]' | sed 's/\[//g' | sed 's/\]//g' | tr -s ' ')
+    if [ -z "$dipol" ]; then
+        echo "Error: Cannot extract center of mass coordinates from center-of-mass.py output"
+        exit 1
+    fi
+    echo "Extracted center of mass coordinates: $dipol"
 
-# Extract content within [] as dipol variable
-dipol=$(echo "$output" | grep -o '\[.*\]' | sed 's/\[//g' | sed 's/\]//g' | tr -s ' ')
-if [ -z "$dipol" ]; then
-    echo "Error: Cannot extract center of mass coordinates from center-of-mass.py output"
-    exit 1
-fi
-echo "Extracted center of mass coordinates: $dipol"
-
-# 5. Modify DIPOL value in INCAR file
-echo "Modifying INCAR file..."
-if [ -f "INCAR" ]; then
-    # Only modify DIPOL line (not affecting LDIPOL and IDIPOL)
-    sed -i "s/^DIPOL\s*=.*/DIPOL = $dipol/" INCAR
-    echo "Updated DIPOL = $dipol"
+    # Modify DIPOL value in INCAR file
+    echo "Modifying INCAR file..."
+    if [ -f "INCAR" ]; then
+        # Only modify DIPOL line (not affecting LDIPOL and IDIPOL)
+        sed -i "s/^DIPOL\s*=.*/DIPOL = $dipol/" INCAR
+        echo "Updated DIPOL = $dipol"
+    else
+        echo "Error: INCAR file does not exist"
+        exit 1
+    fi
 else
-    echo "Error: INCAR file does not exist"
-    exit 1
+    # Comment out dipole-related parameters in INCAR
+    echo "Disabling dipole correction in INCAR..."
+    if [ -f "INCAR" ]; then
+        sed -i 's/^DIPOL\s*=/#DIPOL =/' INCAR
+        sed -i 's/^LDIPOL\s*=/#LDIPOL =/' INCAR
+        sed -i 's/^IDIPOL\s*=/#IDIPOL =/' INCAR
+        echo "Commented out DIPOL, LDIPOL, IDIPOL"
+    else
+        echo "Error: INCAR file does not exist"
+        exit 1
+    fi
 fi
 
-# 6. Modify NSW and comment out optimization-related parameters
+# 5. Modify NSW and comment out optimization-related parameters
 echo "Modifying structure optimization parameters..."
 
 # Change NSW to 1
@@ -135,7 +173,7 @@ else
     echo "Added EDIFF = 1E-07"
 fi
 
-# 7. Set Gibbs calculation parameters
+# 6. Set Gibbs calculation parameters
 echo "Setting Gibbs calculation parameters..."
 
 # Set or modify IBRION to 5
@@ -180,7 +218,7 @@ fi
 
 echo "Set IBRION = 5, POTIM = 0.015, NFREE = 2"
 
-# 8. Modify VASP_EXE in vasp_runscript
+# 7. Modify VASP_EXE in vasp_runscript
 echo "Modifying vasp_runscript..."
 if [ -f "vasp_runscript" ]; then
     sed -i 's/VASP_EXE="vasp_std"/VASP_EXE="vasp_gam"/' vasp_runscript
@@ -204,9 +242,17 @@ echo "  Configuration Summary"
 echo "============================================"
 echo "Calculation Mode: $calc_mode"
 echo "Output Directory: $folder_name"
+if [ "$use_dipole" = true ]; then
+    echo "Dipole Correction: ENABLED (DIPOL = $dipol)"
+else
+    echo "Dipole Correction: DISABLED"
+fi
 echo ""
 echo "=== Key INCAR Parameters ==="
-grep -E "^(DIPOL|NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
+grep -E "^(NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
+if [ "$use_dipole" = true ]; then
+    grep "^DIPOL" INCAR
+fi
 if [ "$nwrite_value" != "default" ]; then
     grep "^NWRITE" INCAR
 else
@@ -216,6 +262,9 @@ echo ""
 echo "=== Commented Lines ==="
 grep "^#IOPT = 7" INCAR
 grep "^#IMAGES\|^#SPRING\|^#LCLIMB\|^#ICHAIN\|^#IOPT" INCAR 2>/dev/null || echo "No commented NEB parameters found"
+if [ "$use_dipole" = false ]; then
+    grep "^#DIPOL\|^#LDIPOL\|^#IDIPOL" INCAR 2>/dev/null || echo "No dipole parameters found in INCAR"
+fi
 echo ""
 echo "=== Key Settings in vasp_runscript ==="
 grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "VASP_EXE setting not found"
@@ -225,5 +274,23 @@ echo ""
 echo "============================================"
 echo "Setup Complete!"
 echo "============================================"
+echo ""
+echo "############################################"
+echo "#  !!  IMPORTANT REMINDERS BEFORE SUBMIT  !!"
+echo "############################################"
+echo ""
+echo "  [1] FREEZE atoms in POSCAR:"
+echo "      Edit $folder_name/POSCAR and add Selective Dynamics."
+echo "      Set ONLY the molecule/adsorbate atoms to 'T T T',"
+echo "      and freeze ALL other atoms (slab, substrate) with 'F F F'."
+echo "      Otherwise the Hessian will be huge and frequencies"
+echo "      will mix slab phonons with molecule modes."
+echo ""
+echo "  [2] Make sure VASP_EXE = vasp_gam in vasp_runscript."
+echo "      (Gamma-only build is required since KPOINTS is now Gamma."
+echo "       The script has already set this, but please double-check.)"
+echo ""
+echo "############################################"
+echo ""
 echo "Please check the files in $folder_name folder,"
-echo "then run vasp_runscript to start the calculation."
+echo "then submit vasp_runscript to start the calculation."
