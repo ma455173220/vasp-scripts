@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Build POSCAR_dimer (with Dimer Axis Block) for VASP IDM (IBRION=44)
-from a frequency-calculation OUTCAR.
+Build POSCAR_dimer (with Dimer Axis Block) and INCAR_idm
+for VASP IDM (IBRION=44) from a frequency-calculation OUTCAR.
 
 Workflow
 --------
@@ -13,8 +13,12 @@ Workflow
        keep distant slab atoms fixed. K-mesh 1x1x1 with vasp_gam.
   3) cp <freq-input POSCAR with original selective-dynamics flags> POSCAR_relax
      get_idm.py
+       -> writes POSCAR_dimer (geometry + dimer axis block)
+       -> writes INCAR_idm    (freq INCAR rewritten for IDM)
   4) mv POSCAR_dimer POSCAR
-     IDM run with IBRION=44, POTIM=0.05, original KPOINTS, NSW=500.
+     mv INCAR_idm    INCAR
+     Restore non-gamma KPOINTS, switch VASP_EXE to vasp_std,
+     then submit the IDM run (IBRION=44, POTIM=0.05, NSW=500).
 """
 
 import argparse
@@ -70,9 +74,59 @@ def extract_displacement(lines, header_idx, n_atoms):
     return disp
 
 
+def convert_incar_to_idm(in_path, out_path):
+    """Rewrite a Gibbs/freq INCAR (or any sane INCAR) into an IDM-ready one.
+
+    Edits applied (only on uncommented lines; trailing inline comments preserved):
+      IBRION  -> 44     (IDM)
+      POTIM   -> 0.05   (IDM step size)
+      NSW     -> 500    (allow many dimer steps)
+      EDIFF   -> 1E-05  (relaxed back from the freq-tight 1E-07)
+      EDIFFG  -> -2E-02 (tighter force criterion for the saddle search)
+      NFREE   -> commented out (unused by IBRION=44)
+      NWRITE  -> commented out (no longer need eigenvectors)
+    Missing IBRION/POTIM/NSW/EDIFF/EDIFFG are appended at the end of the file.
+    All other parameters (ISIF, ENCUT, ISMEAR, SIGMA, NCORE, IVDW, ISYM,
+    DIPOL, ...) are left untouched.
+    """
+    with open(in_path) as f:
+        text = f.read()
+
+    def replace_or_append(text, key, new_value):
+        # Only match uncommented lines (key must be at start, optionally indented).
+        pat = re.compile(
+            rf'^([ \t]*){key}([ \t]*)=([ \t]*)\S+(.*)$',
+            re.MULTILINE,
+        )
+        if pat.search(text):
+            return pat.sub(rf'\g<1>{key}\g<2>=\g<3>{new_value}\g<4>', text)
+        if text and not text.endswith('\n'):
+            text += '\n'
+        return text + f'{key} = {new_value}\n'
+
+    def comment_out(text, key):
+        pat = re.compile(
+            rf'^([ \t]*)({key}[ \t]*=.*)$',
+            re.MULTILINE,
+        )
+        return pat.sub(r'\1# \2', text)
+
+    text = replace_or_append(text, 'IBRION', '44')
+    text = replace_or_append(text, 'POTIM',  '0.05')
+    text = replace_or_append(text, 'NSW',    '500')
+    text = replace_or_append(text, 'EDIFF',  '1E-05')
+    text = replace_or_append(text, 'EDIFFG', '-2E-02')
+    text = comment_out(text, 'NFREE')
+    text = comment_out(text, 'NWRITE')
+
+    with open(out_path, 'w') as f:
+        f.write(text)
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Generate POSCAR_dimer (with Dimer Axis Block) from a VASP freq OUTCAR.",
+        description="Generate POSCAR_dimer (with Dimer Axis Block) and INCAR_idm "
+                    "from a VASP freq OUTCAR.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -82,13 +136,22 @@ def main():
     ap.add_argument('--outcar', default='OUTCAR',
                     help='OUTCAR from the frequency run (default: OUTCAR)')
     ap.add_argument('-o', '--output', default='POSCAR_dimer',
-                    help='Output filename (default: POSCAR_dimer)')
+                    help='Output dimer POSCAR filename (default: POSCAR_dimer)')
     ap.add_argument('--mode', type=int, default=None, metavar='N',
                     help='Force imaginary mode index N (1-based) instead of '
                          'auto-selecting the one with the largest |nu|.')
     ap.add_argument('--normalize', action='store_true',
                     help='Normalize the dimer axis to unit length '
                          '(VASP does this internally; off by default).')
+    ap.add_argument('--incar', default='INCAR',
+                    help='Input INCAR to convert into an IDM-ready INCAR '
+                         '(default: INCAR -- typically the freq/Gibbs INCAR '
+                         'in the current directory).')
+    ap.add_argument('--incar-out', default='INCAR_idm',
+                    help='Output filename for the IDM-ready INCAR '
+                         '(default: INCAR_idm).')
+    ap.add_argument('--no-incar', action='store_true',
+                    help='Skip INCAR conversion (only write POSCAR_dimer).')
     args = ap.parse_args()
 
     # ---- check inputs ----
@@ -97,6 +160,10 @@ def main():
                  f"the original (un-fixed) selective-dynamics flags.")
     if not Path(args.outcar).is_file():
         sys.exit(f"Error: '{args.outcar}' not found.")
+    if not args.no_incar and not Path(args.incar).is_file():
+        sys.exit(f"Error: '{args.incar}' not found. "
+                 f"Pass --no-incar to skip INCAR conversion, "
+                 f"or use --incar to point at the right file.")
 
     # ---- read structure ----
     try:
@@ -197,7 +264,7 @@ def main():
         if norm > 0:
             disp = disp / norm
 
-    # ---- write output ----
+    # ---- write POSCAR_dimer ----
     try:
         atoms.write(args.output, vasp5=True)        # fresh file, overwrites
         with open(args.output, 'a') as f:           # then append the dimer axis block
@@ -207,10 +274,29 @@ def main():
     except Exception as e:
         sys.exit(f"Error writing '{args.output}': {e}")
 
+    # ---- write INCAR_idm ----
+    if not args.no_incar:
+        try:
+            convert_incar_to_idm(args.incar, args.incar_out)
+        except Exception as e:
+            sys.exit(f"Error converting '{args.incar}' -> '{args.incar_out}': {e}")
+
+    # ---- final report ----
     print()
     print(f"Selected: mode {chosen_idx}, {chosen_nu:.3f} cm-1 (imaginary)")
     print(f"Wrote   : {args.output}")
-    print(f"Next    : rename {args.output} -> POSCAR; run IDM with IBRION=44, POTIM=0.05.")
+    if not args.no_incar:
+        print(f"Wrote   : {args.incar_out}  "
+              f"(IBRION=44, POTIM=0.05, NSW=500, EDIFF=1E-05, EDIFFG=-2E-02; "
+              f"NFREE/NWRITE commented out)")
+    print()
+    print("Next steps for the IDM run:")
+    print(f"  mv {args.output} POSCAR")
+    if not args.no_incar:
+        print(f"  mv {args.incar_out}    INCAR")
+    print("  Restore the original (non-gamma) KPOINTS")
+    print("  Set VASP_EXE=vasp_std in vasp_runscript")
+    print("  Submit.")
 
 
 if __name__ == '__main__':
