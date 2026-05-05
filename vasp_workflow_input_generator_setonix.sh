@@ -263,28 +263,123 @@ else
     echo "ℹ️ Skipping gamma-only pre-optimization."
 fi
 
+echo ""
+echo ">>> JOB NUMBER OFFSET (applies to step0/1/2 only)"
+echo "SCF/band/DOS run in separate subdirectories, so their JOBNAME is always 00."
+echo "Only step0/1/2 share the root directory — set an offset if you have already"
+echo "run jobs there manually and want to avoid overwriting their backup files."
+echo "Example: enter 2 if JOBNAME 00 and 01 are already used in this directory."
+read -p "Enter job number offset for step0/1/2 [default: 0]: " JOB_OFFSET
+if [[ -z "$JOB_OFFSET" ]] || ! [[ "$JOB_OFFSET" =~ ^[0-9]+$ ]]; then
+    JOB_OFFSET=0
+fi
+echo "✅ step0/1/2 numbering will start from $(printf "%02d" $JOB_OFFSET)."
+
+# Compute job numbers for step0/1/2 with offset; SCF/band/DOS always use 00
+if [ "$PERFORM_STEP0" = true ]; then
+    JN_STEP0=$(printf "%02d" $(( JOB_OFFSET + 0 )))
+    JN_STEP1=$(printf "%02d" $(( JOB_OFFSET + 1 )))
+    JN_STEP2=$(printf "%02d" $(( JOB_OFFSET + 2 )))
+else
+    JN_STEP1=$(printf "%02d" $(( JOB_OFFSET + 0 )))
+    JN_STEP2=$(printf "%02d" $(( JOB_OFFSET + 1 )))
+fi
+JN_SCF="00"
+JN_BAND="00"
+JN_DOS="00"
+
+# ===== Step selection =====
+echo ""
+echo ">>> SELECT STEPS TO GENERATE"
+echo "Enter step numbers separated by spaces (e.g., \"1 2\" or \"1 2 3 4 5\")."
+echo "Leave blank to generate ALL steps."
+echo ""
+if [ "$PERFORM_STEP0" = true ]; then
+    echo "  [0] Gamma-only pre-optimization (step0)"
+fi
+echo "  [1] Initial optimization        (step1)"
+echo "  [2] LREAL=FALSE optimization    (step2)"
+echo "  [3] SCF calculation             (scf)"
+echo "  [4] Band structure              (band)"
+echo "  [5] DOS calculation             (dos)"
+echo ""
+read -p "Steps to generate: " GEN_STEPS_INPUT
+
+# Parse input into array; default = all steps
+if [[ -z "$GEN_STEPS_INPUT" ]]; then
+    if [ "$PERFORM_STEP0" = true ]; then
+        GEN_STEPS=(0 1 2 3 4 5)
+    else
+        GEN_STEPS=(1 2 3 4 5)
+    fi
+    echo "ℹ️  No selection made — generating all steps."
+else
+    read -ra GEN_STEPS <<< "$GEN_STEPS_INPUT"
+    # Remove step0 from selection if PERFORM_STEP0=false
+    if [ "$PERFORM_STEP0" = false ]; then
+        GEN_STEPS=("${GEN_STEPS[@]/0/}")
+    fi
+fi
+
+# Helper: check if a step is in GEN_STEPS
+gen_has() { [[ " ${GEN_STEPS[*]} " =~ " $1 " ]]; }
+
+# ---- Dependency resolution (INCAR chain) ----
+# scf needs step2's INCAR as base; band needs scf's; dos needs band's.
+# If a downstream step is selected but its upstream INCAR won't be generated
+# AND doesn't already exist on disk, auto-include the upstream generation.
+ADDED_DEPS=()
+
+if gen_has 5 && ! gen_has 4 && [ ! -f "INCAR_band" ]; then
+    GEN_STEPS+=(4); ADDED_DEPS+=("4(band) required by 5(dos)")
+fi
+if gen_has 4 && ! gen_has 3 && [ ! -f "INCAR_scf" ]; then
+    GEN_STEPS+=(3); ADDED_DEPS+=("3(scf) required by 4(band)")
+fi
+if gen_has 3 && ! gen_has 2 && [ ! -f "INCAR_step2" ]; then
+    GEN_STEPS+=(2); ADDED_DEPS+=("2(step2) required by 3(scf)")
+fi
+
+if [ ${#ADDED_DEPS[@]} -gt 0 ]; then
+    echo "⚠️  Auto-added missing upstream dependencies:"
+    for dep in "${ADDED_DEPS[@]}"; do echo "    • $dep"; done
+fi
+
+echo ""
+echo "✅ Will generate files for steps: ${GEN_STEPS[*]}"
+echo "============================================================"
+
 # ===== Step 0 (Optional Gamma-only pre-optimization) =====
 if [ "$PERFORM_STEP0" = true ]; then
+if gen_has 0; then
     separator "STEP 0: Generating INCAR_step0 (Gamma-only pre-optimization)"
     cp INCAR INCAR_step0
     echo -e "102\n1\n0\n" | vaspkit > /dev/null 2>&1
     mv KPOINTS KPOINTS_step0
     echo "🔧 KPOINTS_step0 generated (Gamma-only)."
     cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step0"
-    update_runscript "${RUNSCRIPT_BASE}_step0" "00" "KPOINTS_step0"
+    update_runscript "${RUNSCRIPT_BASE}_step0" "$JN_STEP0" "KPOINTS_step0"
     echo "✅ Step0 files created for gamma-only pre-optimization."
+else
+    echo "⏭️  Skipping step0 generation."
+fi
 fi
 
 # ===== Step 1 =====
+if gen_has 1; then
 separator "STEP 1: Generating INCAR_step1"
 cp INCAR INCAR_step1
 echo -e "102\n1\n0.04\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_step1
 echo "🔧 KPOINTS_step1 generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step1"
-update_runscript "${RUNSCRIPT_BASE}_step1" "01" "KPOINTS_step1"
+update_runscript "${RUNSCRIPT_BASE}_step1" "$JN_STEP1" "KPOINTS_step1"
+else
+    echo "⏭️  Skipping step1 generation."
+fi
 
 # ===== Step 2 =====
+if gen_has 2; then
 separator "STEP 2: Generating INCAR_step2"
 cp INCAR INCAR_step2
 update_key INCAR_step2 "LREAL" "COMMENT" "Disable LREAL=Auto for second optimization"
@@ -292,9 +387,13 @@ echo -e "102\n1\n0.04\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_step2
 echo "🔧 KPOINTS_step2 generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_step2"
-update_runscript "${RUNSCRIPT_BASE}_step2" "02" "KPOINTS_step2"
+update_runscript "${RUNSCRIPT_BASE}_step2" "$JN_STEP2" "KPOINTS_step2"
+else
+    echo "⏭️  Skipping step2 generation."
+fi
 
 # ===== Step 3 =====
+if gen_has 3; then
 separator "STEP 3: Generating INCAR_scf"
 cp INCAR_step2 INCAR_scf
 update_key INCAR_scf "LWAVE"  ".TRUE."   "Write WAVECAR"
@@ -339,9 +438,13 @@ echo -e "102\n1\n0.03\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_scf
 echo "🔧 KPOINTS_scf generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_scf"
-update_runscript "${RUNSCRIPT_BASE}_scf" "03" "KPOINTS_scf"
+update_runscript "${RUNSCRIPT_BASE}_scf" "$JN_SCF" "KPOINTS_scf"
+else
+    echo "⏭️  Skipping scf generation."
+fi
 
 # ===== Step 6 =====
+if gen_has 4; then
 separator "STEP 6: Generating INCAR_band"
 cp INCAR_scf INCAR_band
 update_key INCAR_band "ICHARG" "11"     "Band structure calculation"
@@ -355,9 +458,13 @@ echo -e "303\n" | vaspkit > /dev/null 2>&1
 mv KPATH.in KPOINTS_band
 echo "🔧 KPOINTS_band generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_band"
-update_runscript "${RUNSCRIPT_BASE}_band" "04" "KPOINTS_band"
+update_runscript "${RUNSCRIPT_BASE}_band" "$JN_BAND" "KPOINTS_band"
+else
+    echo "⏭️  Skipping band generation."
+fi
 
 # ===== Step 8 =====
+if gen_has 5; then
 separator "STEP 8: Generating INCAR_dos"
 cp INCAR_band INCAR_dos
 update_key INCAR_dos "NEDOS"  "3001" "DOS calculation points"
@@ -368,7 +475,10 @@ echo -e "102\n1\n0.02\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_dos
 echo "🔧 KPOINTS_dos generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_dos"
-update_runscript "${RUNSCRIPT_BASE}_dos" "05" "KPOINTS_dos"
+update_runscript "${RUNSCRIPT_BASE}_dos" "$JN_DOS" "KPOINTS_dos"
+else
+    echo "⏭️  Skipping dos generation."
+fi
 
 # ===== Generate workflow execution script =====
 separator "Generating workflow execution script: $WORKFLOW_SCRIPT"
@@ -676,40 +786,26 @@ EOL
 chmod +x "$WORKFLOW_SCRIPT"
 
 echo "============================================================"
-if [ "$PERFORM_STEP0" = true ]; then
-    echo "✅ All files generated successfully including step0 (gamma-only pre-optimization):"
-    echo "   - INCAR_step0, KPOINTS_step0, ${RUNSCRIPT_BASE}_step0 (JOBNAME=00, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step0"))"
-    echo "   - INCAR_step1, KPOINTS_step1, ${RUNSCRIPT_BASE}_step1 (JOBNAME=01, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step1"))"
-    echo "   - INCAR_step2, KPOINTS_step2, ${RUNSCRIPT_BASE}_step2 (JOBNAME=02, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step2"))"
-    echo "   - INCAR_scf, KPOINTS_scf, ${RUNSCRIPT_BASE}_scf (JOBNAME=03, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_scf"))"
-    echo "   - INCAR_band, KPOINTS_band, ${RUNSCRIPT_BASE}_band (JOBNAME=04, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_band"))"
-    echo "   - INCAR_dos, KPOINTS_dos, ${RUNSCRIPT_BASE}_dos (JOBNAME=05, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_dos"))"
-    echo ""
-    echo "🎯 Generated workflow execution script: $WORKFLOW_SCRIPT"
-    echo ""
-    echo "📋 Recommended workflow with gamma-only pre-optimization:"
-    echo "   1. Edit $WORKFLOW_SCRIPT to select desired steps (RUN_STEPS array)"
-    echo "   2. Run \"nohup ./$WORKFLOW_SCRIPT &\" to execute the workflow"
-    echo ""
-    echo "   Default steps: Step0 (gamma-only) → Step1 → Step2 → SCF"
-    echo "   Full workflow: Step0 → Step1 → Step2 → SCF → Band & DOS"
-else
-    echo "✅ All INCAR_xxx, KPOINTS_xxx, and ${RUNSCRIPT_BASE}_xxx generated successfully:"
-    echo "   - INCAR_step1, KPOINTS_step1, ${RUNSCRIPT_BASE}_step1 (JOBNAME=01, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step1"))"
-    echo "   - INCAR_step2, KPOINTS_step2, ${RUNSCRIPT_BASE}_step2 (JOBNAME=02, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step2"))"
-    echo "   - INCAR_scf, KPOINTS_scf, ${RUNSCRIPT_BASE}_scf (JOBNAME=03, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_scf"))"
-    echo "   - INCAR_band, KPOINTS_band, ${RUNSCRIPT_BASE}_band (JOBNAME=04, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_band"))"
-    echo "   - INCAR_dos, KPOINTS_dos, ${RUNSCRIPT_BASE}_dos (JOBNAME=05, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_dos"))"
-    echo ""
-    echo "🎯 Generated workflow execution script: $WORKFLOW_SCRIPT"
-    echo ""
-    echo "📋 Standard workflow:"
-    echo "   1. Edit $WORKFLOW_SCRIPT to select desired steps (RUN_STEPS array)"
-    echo "   2. Run \"nohup ./$WORKFLOW_SCRIPT &\" to execute the workflow"
-    echo ""
-    echo "   Default steps: Step1 → Step2 → SCF"
-    echo "   Full workflow: Step1 → Step2 → SCF → Band & DOS"
-fi
+echo "✅ Files generated for selected steps: ${GEN_STEPS[*]}"
+echo ""
+gen_has 0 && [ "$PERFORM_STEP0" = true ] && \
+    echo "   - INCAR_step0, KPOINTS_step0, ${RUNSCRIPT_BASE}_step0 (JOBNAME=$JN_STEP0, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step0"))"
+gen_has 1 && \
+    echo "   - INCAR_step1, KPOINTS_step1, ${RUNSCRIPT_BASE}_step1 (JOBNAME=$JN_STEP1, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step1"))"
+gen_has 2 && \
+    echo "   - INCAR_step2, KPOINTS_step2, ${RUNSCRIPT_BASE}_step2 (JOBNAME=$JN_STEP2, VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_step2"))"
+gen_has 3 && \
+    echo "   - INCAR_scf,   KPOINTS_scf,   ${RUNSCRIPT_BASE}_scf   (JOBNAME=$JN_SCF,   VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_scf"))"
+gen_has 4 && \
+    echo "   - INCAR_band,  KPOINTS_band,  ${RUNSCRIPT_BASE}_band  (JOBNAME=$JN_BAND,  VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_band"))"
+gen_has 5 && \
+    echo "   - INCAR_dos,   KPOINTS_dos,   ${RUNSCRIPT_BASE}_dos   (JOBNAME=$JN_DOS,   VASP_EXE=$(get_vasp_exe "${RUNSCRIPT_BASE}_dos"))"
+echo ""
+echo "🎯 Generated workflow execution script: $WORKFLOW_SCRIPT"
+echo ""
+echo "📋 To run the workflow:"
+echo "   1. Edit $WORKFLOW_SCRIPT to select desired steps (RUN_STEPS array)"
+echo "   2. Run \"nohup ./$WORKFLOW_SCRIPT &\" to execute the workflow"
 echo ""
 echo "⚠️ IMPORTANT NOTES:"
 echo "   • VASP_EXE is automatically set based on k-mesh in KPOINTS files:"

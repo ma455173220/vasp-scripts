@@ -216,7 +216,7 @@ sys.stdout.write("\033[0;0m") # reset color
 
 print('''
 ! Total dipole moment comes from:
-!     \D_{ion} - \D_{elect}
+!     \\D_{ion} - \\D_{elect}
 ! So the direction is correct.
 ! To use C/A unit, simply dot abs(e).''')
 
