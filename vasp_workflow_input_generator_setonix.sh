@@ -54,11 +54,6 @@ echo "Checking VASP-related tools..."
 check_command "vaspkit" "VASP toolkit for generating KPOINTS"
 
 echo ""
-echo "Checking Python scripts (if exist)..."
-# Common Python scripts that might be used
-check_command "center-of-mass.py" "Center of mass calculation for dipole correction"
-
-echo ""
 echo "Checking base runscript template..."
 RUNSCRIPT_BASE="vasp_runscript"  # This will be configurable later
 check_script "$RUNSCRIPT_BASE" "Base VASP submission script template"
@@ -200,20 +195,27 @@ update_runscript() {
     local vasp_exe="vasp_std"  # default
     
     if [ -f "$kpoints_file" ]; then
-        # Read the fourth line of KPOINTS file which contains the k-mesh
-        local kmesh_line=$(sed -n '4p' "$kpoints_file")
-        # Extract k-mesh values
-        local kx=$(echo $kmesh_line | awk '{print $1}')
-        local ky=$(echo $kmesh_line | awk '{print $2}')
-        local kz=$(echo $kmesh_line | awk '{print $3}')
-        
-        # Check if it's gamma-only (1 1 1)
-        if [[ "$kx" == "1" && "$ky" == "1" && "$kz" == "1" ]]; then
-            vasp_exe="vasp_gam"
-            echo "🔍 Detected 1×1×1 k-mesh in $kpoints_file → using vasp_gam"
-        else
+        # Check if it's a line-mode KPOINTS (e.g., band structure via vaspkit 303)
+        local line3=$(sed -n '3p' "$kpoints_file" | tr '[:upper:]' '[:lower:]')
+        if [[ "$line3" == *"line"* ]]; then
             vasp_exe="vasp_std"
-            echo "🔍 Detected ${kx}×${ky}×${kz} k-mesh in $kpoints_file → using vasp_std"
+            echo "🔍 Detected line-mode KPOINTS in $kpoints_file → using vasp_std"
+        else
+            # Read the fourth line of KPOINTS file which contains the k-mesh
+            local kmesh_line=$(sed -n '4p' "$kpoints_file")
+            # Extract k-mesh values
+            local kx=$(echo $kmesh_line | awk '{print $1}')
+            local ky=$(echo $kmesh_line | awk '{print $2}')
+            local kz=$(echo $kmesh_line | awk '{print $3}')
+
+            # Check if it's gamma-only (1 1 1)
+            if [[ "$kx" == "1" && "$ky" == "1" && "$kz" == "1" ]]; then
+                vasp_exe="vasp_gam"
+                echo "🔍 Detected 1×1×1 k-mesh in $kpoints_file → using vasp_gam"
+            else
+                vasp_exe="vasp_std"
+                echo "🔍 Detected ${kx}×${ky}×${kz} k-mesh in $kpoints_file → using vasp_std"
+            fi
         fi
     else
         echo "⚠️ KPOINTS file $kpoints_file not found, defaulting to vasp_std"
@@ -249,31 +251,45 @@ fi
 WORKFLOW_SCRIPT="${PREFIX}.sh"
 
 echo ""
-echo ">>> GAMMA-ONLY PRE-OPTIMIZATION OPTION"
-echo "Would you like to perform a gamma-only pre-optimization before step1?"
-echo "This can be useful for large systems to get a rough initial structure."
-read -p "Enter [y/n]: " -r
-echo
-
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    PERFORM_STEP0=true
-    echo "✅ Gamma-only pre-optimization (step0) will be included."
-else
-    PERFORM_STEP0=false
-    echo "ℹ️ Skipping gamma-only pre-optimization."
-fi
-
-echo ""
-echo ">>> JOB NUMBER OFFSET (applies to step0/1/2 only)"
-echo "SCF/band/DOS run in separate subdirectories, so their JOBNAME is always 00."
-echo "Only step0/1/2 share the root directory — set an offset if you have already"
-echo "run jobs there manually and want to avoid overwriting their backup files."
-echo "Example: enter 2 if JOBNAME 00 and 01 are already used in this directory."
-read -p "Enter job number offset for step0/1/2 [default: 0]: " JOB_OFFSET
+echo ">>> JOB NUMBER OFFSET (step0/1/2 only; SCF/band/DOS always 00)"
+read -p "Offset if jobs 00/01/... already exist in this directory [default: 0]: " JOB_OFFSET
 if [[ -z "$JOB_OFFSET" ]] || ! [[ "$JOB_OFFSET" =~ ^[0-9]+$ ]]; then
     JOB_OFFSET=0
 fi
-echo "✅ step0/1/2 numbering will start from $(printf "%02d" $JOB_OFFSET)."
+echo "✅ step0/1/2 will start from $(printf "%02d" $JOB_OFFSET)."
+
+# ===== Step selection =====
+echo ""
+echo ">>> SELECT STEPS TO GENERATE"
+echo "Enter step numbers separated by spaces (e.g., \"1 2\" or \"1 2 3 4 5\")."
+echo "Leave blank to generate ALL steps."
+echo ""
+echo "  [0] Gamma-only pre-optimization (step0)"
+echo "  [1] Initial optimization        (step1)"
+echo "  [2] LREAL=FALSE optimization    (step2)"
+echo "  [3] SCF calculation             (scf)"
+echo "  [4] Band structure              (band)"
+echo "  [5] DOS calculation             (dos)"
+echo ""
+read -p "Steps to generate: " GEN_STEPS_INPUT
+
+# Parse input into array; default = all steps
+if [[ -z "$GEN_STEPS_INPUT" ]]; then
+    GEN_STEPS=(0 1 2 3 4 5)
+    echo "ℹ️  No selection made — generating all steps."
+else
+    read -ra GEN_STEPS <<< "$GEN_STEPS_INPUT"
+fi
+
+# Helper: check if a step is in GEN_STEPS
+gen_has() { [[ " ${GEN_STEPS[*]} " =~ " $1 " ]]; }
+
+# Derive PERFORM_STEP0 from step selection
+if gen_has 0; then
+    PERFORM_STEP0=true
+else
+    PERFORM_STEP0=false
+fi
 
 # Compute job numbers for step0/1/2 with offset; SCF/band/DOS always use 00
 if [ "$PERFORM_STEP0" = true ]; then
@@ -288,41 +304,37 @@ JN_SCF="00"
 JN_BAND="00"
 JN_DOS="00"
 
-# ===== Step selection =====
 echo ""
-echo ">>> SELECT STEPS TO GENERATE"
-echo "Enter step numbers separated by spaces (e.g., \"1 2\" or \"1 2 3 4 5\")."
-echo "Leave blank to generate ALL steps."
-echo ""
-if [ "$PERFORM_STEP0" = true ]; then
-    echo "  [0] Gamma-only pre-optimization (step0)"
-fi
-echo "  [1] Initial optimization        (step1)"
-echo "  [2] LREAL=FALSE optimization    (step2)"
-echo "  [3] SCF calculation             (scf)"
-echo "  [4] Band structure              (band)"
-echo "  [5] DOS calculation             (dos)"
-echo ""
-read -p "Steps to generate: " GEN_STEPS_INPUT
-
-# Parse input into array; default = all steps
-if [[ -z "$GEN_STEPS_INPUT" ]]; then
-    if [ "$PERFORM_STEP0" = true ]; then
-        GEN_STEPS=(0 1 2 3 4 5)
+echo ">>> DIPOLE CORRECTION"
+read -p "Enable dipole correction? [y/N]: " -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    USE_DIPOL_CORR=1
+    echo "✅ Dipole correction enabled."
+    missing_tags=()
+    for tag in LDIPOL IDIPOL DIPOL; do
+        if ! grep -qiE "^\s*${tag}\s*=" INCAR 2>/dev/null; then
+            missing_tags+=("$tag")
+        fi
+    done
+    if [[ ${#missing_tags[@]} -gt 0 ]]; then
+        echo "❌ INCAR is missing or has commented-out dipole tags:"
+        for t in "${missing_tags[@]}"; do
+            echo "   • $t"
+        done
+        echo "   Add/uncomment these tags in INCAR before running the generator."
+        exit 1
+    fi
+    echo "✅ INCAR contains LDIPOL, IDIPOL, and DIPOL."
+    if ! command -v center-of-mass.py >/dev/null 2>&1; then
+        echo "⚠️  center-of-mass.py not found in PATH — dipole correction will fail at runtime."
     else
-        GEN_STEPS=(1 2 3 4 5)
+        echo "✅ center-of-mass.py found."
     fi
-    echo "ℹ️  No selection made — generating all steps."
 else
-    read -ra GEN_STEPS <<< "$GEN_STEPS_INPUT"
-    # Remove step0 from selection if PERFORM_STEP0=false
-    if [ "$PERFORM_STEP0" = false ]; then
-        GEN_STEPS=("${GEN_STEPS[@]/0/}")
-    fi
+    USE_DIPOL_CORR=0
+    echo "ℹ️  Dipole correction disabled."
 fi
-
-# Helper: check if a step is in GEN_STEPS
-gen_has() { [[ " ${GEN_STEPS[*]} " =~ " $1 " ]]; }
 
 # ---- Dependency resolution (INCAR chain) ----
 # scf needs step2's INCAR as base; band needs scf's; dos needs band's.
@@ -350,7 +362,6 @@ echo "✅ Will generate files for steps: ${GEN_STEPS[*]}"
 echo "============================================================"
 
 # ===== Step 0 (Optional Gamma-only pre-optimization) =====
-if [ "$PERFORM_STEP0" = true ]; then
 if gen_has 0; then
     separator "STEP 0: Generating INCAR_step0 (Gamma-only pre-optimization)"
     cp INCAR INCAR_step0
@@ -362,7 +373,6 @@ if gen_has 0; then
     echo "✅ Step0 files created for gamma-only pre-optimization."
 else
     echo "⏭️  Skipping step0 generation."
-fi
 fi
 
 # ===== Step 1 =====
@@ -406,7 +416,7 @@ update_key INCAR_scf "ICORELEVEL" "1" "Core energies"
 # update_key INCAR_scf "LVHAR" ".TRUE."    "Write total local potential"
 
 # ===== Step 4 =====
-echo ">>> STEP 4: LMAXMIX Adjustment based on POSCAR"
+echo ">>> SCF: Checking LMAXMIX based on POSCAR elements"
 if [ -f "POSCAR" ]; then
     echo "Checking elements in POSCAR for LMAXMIX adjustment..."
     elements=$(awk 'NR==6 {for (i=1; i<=NF; i++) print $i}' POSCAR)
@@ -433,7 +443,7 @@ if [ -f "POSCAR" ]; then
 fi
 
 # ===== Step 5 =====
-echo ">>> STEP 5: Generating KPOINTS_scf"
+echo ">>> SCF: Generating KPOINTS_scf"
 echo -e "102\n1\n0.03\n" | vaspkit > /dev/null 2>&1
 mv KPOINTS KPOINTS_scf
 echo "🔧 KPOINTS_scf generated."
@@ -524,22 +534,15 @@ cat >> "$WORKFLOW_SCRIPT" << 'EOL'
 ##############################################
 EOL
 
-if [ "$PERFORM_STEP0" = true ]; then
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(0 1 2)
+RUN_STEPS=(${GEN_STEPS[@]})
 EOL
-else
-cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(1 2)
-EOL
-fi
 
 cat >> "$WORKFLOW_SCRIPT" << EOL
 JOB_NAME="${PREFIX}_workflow"
 
-# Whether to apply dipole correction (true/false)
-# 1 = enable dipole correction, 0 = disable
-USE_DIPOL_CORR=0
+# Whether to apply dipole correction (1 = enable, 0 = disable)
+USE_DIPOL_CORR=${USE_DIPOL_CORR}
 
 # ===== Submission script base name (customize here) =====
 RUNSCRIPT_BASE="$RUNSCRIPT_BASE"  # Change this prefix to customize submission script names
@@ -548,7 +551,7 @@ RUNSCRIPT_BASE="$RUNSCRIPT_BASE"  # Change this prefix to customize submission s
 ##############################################
 # ===== PATH CONFIGURATION =====
 ROOT_DIR=\$(pwd)                       # Root working directory
-SCF_DIR="\$ROOT_DIR/NON-SC-kmesh-0.03" # SCF output directory
+SCF_DIR="\$ROOT_DIR/SCF-kmesh-0.03" # SCF output directory
 BAND_DIR="\$ROOT_DIR/BAND"             # Band structure directory
 DOS_DIR="\$ROOT_DIR/DOS"               # DOS directory
 
@@ -581,19 +584,27 @@ check_job_done() {
             OUTCAR_FILE="\$workdir/OUTCAR"
             # Check convergence conditions
             if [[ \$check_mode == "opt" ]]; then
-                grep -q "Total CPU time used" "\$OUTCAR_FILE" && grep -q "reached required accuracy" "\$OUTCAR_FILE" \\
-                    && grep -q "EDIFF is reached" "\$OUTCAR_FILE" \\
-                    && echo "✅ Step \$step completed successfully." >> "\$LOGFILE" \\
-                    || { echo "❌ Step \$step failed." >> "\$LOGFILE"; exit 1; }
+                if grep -q "Total CPU time used" "\$OUTCAR_FILE" && grep -q "reached required accuracy" "\$OUTCAR_FILE"; then
+                    echo "✅ Step \$step completed successfully." >> "\$LOGFILE"
+                else
+                    echo "❌ Step \$step failed." >> "\$LOGFILE"
+                    { echo "==============================================="; echo "=== WORKFLOW FAILED at \$(date '+%Y-%m-%d %H:%M:%S') ==="; echo "Step: \$step"; echo "Dir: \$(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log
+                    exit 1
+                fi
             elif [[ \$check_mode == "scf" ]]; then
-                grep -q "Total CPU time used" "\$OUTCAR_FILE" && grep -q "EDIFF is reached" "\$OUTCAR_FILE" \\
-                    && echo "✅ Step \$step completed successfully." >> "\$LOGFILE" \\
-                    || { echo "❌ Step \$step failed." >> "\$LOGFILE"; exit 1; }
+                if grep -q "Total CPU time used" "\$OUTCAR_FILE" && grep -q "EDIFF is reached" "\$OUTCAR_FILE"; then
+                    echo "✅ Step \$step completed successfully." >> "\$LOGFILE"
+                else
+                    echo "❌ Step \$step failed." >> "\$LOGFILE"
+                    { echo "==============================================="; echo "=== WORKFLOW FAILED at \$(date '+%Y-%m-%d %H:%M:%S') ==="; echo "Step: \$step"; echo "Dir: \$(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log
+                    exit 1
+                fi
             fi
             break
         fi
     done
 }
+
 EOL
 
 if [ "$PERFORM_STEP0" = true ]; then
@@ -678,7 +689,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cp KPOINTS_scf "$SCF_DIR/KPOINTS"
     cp POTCAR "$SCF_DIR/"
     cp CONTCAR "$SCF_DIR/POSCAR"
-    cd "$SCF_DIR"
+    cd "$SCF_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to enter $SCF_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $SCF_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
         com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
@@ -686,7 +697,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     fi
     JOBID3=$($SUB_CMD ${RUNSCRIPT_BASE}_scf | awk '{print $NF}')
     check_job_done 3 $JOBID3 "scf" "$SCF_DIR"
-    cd "$ROOT_DIR"
+    cd "$ROOT_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to return to $ROOT_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $ROOT_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
 fi
 
 ##############################################
@@ -695,7 +706,7 @@ fi
 run_band() {
     echo "=== Step 4: Band Structure Started ===" >> "$LOGFILE"
     mkdir -p "$BAND_DIR"
-    cd "$BAND_DIR"
+    cd "$BAND_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to enter $BAND_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $BAND_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
     ln -sf "$SCF_DIR/CHGCAR" CHGCAR      # Link SCF charge density
     cp "$SCF_DIR/POSCAR" POSCAR          # Use SCF structure
     cp "$ROOT_DIR/POTCAR" POTCAR
@@ -709,7 +720,7 @@ run_band() {
     fi
     JOBID4=$($SUB_CMD ${RUNSCRIPT_BASE}_band | awk '{print $NF}')
     check_job_done 4 $JOBID4 "scf" "$BAND_DIR"
-    cd "$ROOT_DIR"
+    cd "$ROOT_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to return to $ROOT_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $ROOT_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
 }
 
 ##############################################
@@ -718,7 +729,7 @@ run_band() {
 run_dos() {
     echo "=== Step 5: DOS Calculation Started ===" >> "$LOGFILE"
     mkdir -p "$DOS_DIR"
-    cd "$DOS_DIR"
+    cd "$DOS_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to enter $DOS_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $DOS_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
     ln -sf "$SCF_DIR/CHGCAR" CHGCAR      # Link SCF charge density
     cp "$SCF_DIR/POSCAR" POSCAR          # Use SCF structure
     cp "$ROOT_DIR/POTCAR" POTCAR
@@ -732,7 +743,7 @@ run_dos() {
     fi
     JOBID5=$($SUB_CMD ${RUNSCRIPT_BASE}_dos | awk '{print $NF}')
     check_job_done 5 $JOBID5 "scf" "$DOS_DIR"
-    cd "$ROOT_DIR"
+    cd "$ROOT_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to return to $ROOT_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $ROOT_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
 }
 
 ##############################################
@@ -760,10 +771,12 @@ if [[ " ${RUN_STEPS[@]} " =~ " 4 " && " ${RUN_STEPS[@]} " =~ " 5 " ]]; then
     # Check results
     if [[ $STATUS_BAND -ne 0 ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Error: Band Structure step failed (PID=$PID_BAND)" >> "$LOGFILE"
+        { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "Step: Band Structure"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log
         exit 1
     fi
     if [[ $STATUS_DOS -ne 0 ]]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Error: DOS step failed (PID=$PID_DOS)" >> "$LOGFILE"
+        { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "Step: DOS"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log
         exit 1
     fi
 
@@ -813,5 +826,5 @@ echo "     - vasp_gam for 1×1×1 k-mesh (gamma-only calculations)"
 echo "     - vasp_std for all other k-meshes"
 echo "   • For large systems, even with denser k-mesh settings, you might still get 1×1×1"
 echo "   • Always check the console output above to see which VASP executable was assigned"
-echo "   • The workflow script $WORKFLOW_SCRIPT includes automatic dipole correction"
-echo "   • Modify USE_DIPOL_CORR=1 in $WORKFLOW_SCRIPT if dipole correction is needed"
+echo "   • Dipole correction: USE_DIPOL_CORR=${USE_DIPOL_CORR} (set during this run)"
+

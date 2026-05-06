@@ -33,6 +33,7 @@ NCORE = 32           #(Try NCORE=No. of cpus/node/2)
 # LDIPOL = .TRUE.      #(Adjust the polarisation)
                        #(If do a molecular adsorption calculation, you may need to turn off this)
 # IDIPOL = 3           #(1-x; 2-y; 3-z; 4-all directions)
+# DIPOL = 0.5 0.5 0.5
 
 
 ### Work Function Calculation ###
