@@ -44,7 +44,7 @@ NCORE = 32           #(Try NCORE=No. of cpus/node/2)
 ISPIN = 2            #(Spin polarised DFT;  default=1)
 # FERWE =            #(Sets the occupancies of the spin-up states)
 # FERDO =            #(Sets the occupancies of the spin-down states)
-# MAGMOM = 2*1 3*1     #(No of Atoms*MAGMOM value; setting MAGMOM 1.3*theoretical value)
+# MAGMOM = 900*0     #(No of Atoms*MAGMOM value; setting MAGMOM 1.3*theoretical value)
 # NUPDOWN = 0
 # VOSKOWN = 1
  
