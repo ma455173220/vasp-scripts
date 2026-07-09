@@ -95,6 +95,11 @@ import argparse
 import re
 import sys
 from pathlib import Path
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 # ── 改这里(场景1)：增删轨道分组，key 会自动成为 --shells 的合法选项 ──
 # 轨道索引约定 (VASP LORBIT=11)：
