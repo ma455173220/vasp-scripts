@@ -68,6 +68,7 @@ IBRION =  2            #(Algorithm: 0-MD; 1-Quasi-New; 2-CG; -1-Non SCF calculat
 # POTIM = 0.1          #(Change the step width of of ionic relaxation; Default: 0.5:IBRION=1,2,3; 0.015:IBRION=5)
 ISIF   =  3            #(Stress/relaxation: 2-Ions, 3-Shape/Ions/V, 4-Shape/Ions)
                        #(Use ISIF=2 for slab calculation)
+# LATTICE_CONSTRAINTS = .TRUE. .TRUE. .FALSE.  #(Use for 2D material relax)
 ENCUT  =  520          #(ISIF=3, use larger ENCUT)
 EDIFFG = -2E-02      #(Ionic convergence; eV/AA)
 # SYMPREC = 1E-06

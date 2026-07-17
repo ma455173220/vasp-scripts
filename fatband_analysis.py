@@ -111,6 +111,20 @@ SHELLS = {
     "f": [9, 10, 11, 12, 13, 14, 15],
 }
 
+PYPROCAR_CACHE_FILES = ("ebs.pkl", "structure.pkl", "kpath.pkl")
+
+
+def reset_pyprocar_cache(dirname: Path):
+    """删除旧缓存，确保本次运行重新解析当前 VASP 输出。"""
+    removed = []
+    for name in PYPROCAR_CACHE_FILES:
+        cache = dirname / name
+        if cache.exists():
+            cache.unlink()
+            removed.append(name)
+    if removed:
+        print("删除旧 PyProcar 缓存: " + ", ".join(removed))
+
 
 def parse_poscar_species(poscar: Path):
     """返回 {元素: [原子索引(0-based)]}，按 POSCAR 顺序。"""
@@ -163,6 +177,8 @@ def main():
     for f in ("PROCAR", "OUTCAR", "POSCAR", "KPOINTS"):
         if not (d / f).exists():
             sys.exit(f"缺少 {d/f} —— 需要能带路径非自洽计算目录 (LORBIT=11)。")
+
+    reset_pyprocar_cache(d)
 
     species = parse_poscar_species(d / "POSCAR")
     efermi_auto, soc = parse_outcar(d / "OUTCAR")
