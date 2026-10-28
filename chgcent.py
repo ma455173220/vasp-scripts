@@ -34,11 +34,11 @@ print(time.strftime("%H:%M:%S on %a %d %b %Y"))
 
 if not os.path.isfile(prm.CHGCAR):
     print("\n** ERROR: Input file %s was not found." % prm.CHGCAR)
-    sys.exit(0)
+    sys.exit(1)
 
 if not os.path.isfile(prm.OUTCAR):
-    print("\n** ERROR: Input file %s was not found." % prm.CHGCAR)
-    sys.exit(0)
+    print("\n** ERROR: Input file %s was not found." % prm.OUTCAR)
+    sys.exit(1)
 
 
 # Read information from command line
@@ -196,7 +196,7 @@ print("ions per type = ", ions_per_type)
 
 if len(ions_per_type) != len(ZVAL):
     print("len(ions_per_type) != len(ZVAL)")
-    sys.exit(0)
+    sys.exit(1)
 
 print("\nIonic positions (Cartisen) for each type:")
 for i in range(len(ZVAL)):
@@ -204,11 +204,12 @@ for i in range(len(ZVAL)):
     print(pos[sum(int(n) for n in (ions_per_type[:i])):sum(int(n) for n in (ions_per_type[:i])) + int(ions_per_type[i])])
 
 # calculate total ionic dipole moments
-total_ion_dipole = [0,0,0]
+total_ion_dipole = np.zeros(3)
 for i in range(len(ZVAL)):
     #print "type : %i" % int(i)
     #print int(float(ZVAL[i]))*pos[sum(int(n) for n in (ions_per_type[:i])):sum(int(n) for n in (ions_per_type[:i])) + int(ions_per_type[i])]
-    total_ion_dipole += sum(int(float(ZVAL[i]))*pos[sum(int(n) for n in (ions_per_type[:i])):sum(int(n) for n in (ions_per_type[:i])) + int(ions_per_type[i])])
+    # ZVAL as float: fractional valences (e.g. pseudo-H H.75) must not be truncated
+    total_ion_dipole += sum(float(ZVAL[i])*pos[sum(int(n) for n in (ions_per_type[:i])):sum(int(n) for n in (ions_per_type[:i])) + int(ions_per_type[i])])
 
 sys.stdout.write("\033[0;32m") # set color green
 print("\nTotal ionic dipole moments (e*A) =  %8.5f  %8.5f  %8.5f" % (total_ion_dipole[0], total_ion_dipole[1], total_ion_dipole[2]))

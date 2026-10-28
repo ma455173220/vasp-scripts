@@ -16,8 +16,8 @@ FOLDER_PREFIXES="v_S v_Zr S_Zr Zr_S S_i_C3v_Zr2.29 Zr_i_C3v_S2.22"
 # 次级文件夹名称
 SUBFOLDER_NAME="vasp_gam_lreal-false"
 
-# 要执行的命令
-COMMAND="sbatch --qos=high $SXDEFECT_JOB"
+# 要执行的命令（留空则按作业脚本头自动选择：Slurm → sbatch --qos=high，PBS → qsub）
+COMMAND="${COMMAND:-}"
 
 # 是否实际执行命令 (true/false)
 EXECUTE_COMMAND=true
@@ -63,6 +63,30 @@ reverse_charge() {
         echo ""
     fi
 }
+
+# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
+# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
+detect_submit_cmd() {
+    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
+        echo "sbatch"
+    elif grep -q "^#PBS" "$1" 2>/dev/null; then
+        echo "qsub"
+    elif command -v sbatch >/dev/null 2>&1; then
+        echo "sbatch"
+    else
+        echo "qsub"
+    fi
+}
+
+if [ -z "$COMMAND" ]; then
+    job_src=$(resolve_file "$SXDEFECT_JOB" "$SXDEFECT_JOB")
+    if [ "$(detect_submit_cmd "$job_src")" = "sbatch" ]; then
+        COMMAND="sbatch --qos=high $SXDEFECT_JOB"
+    else
+        COMMAND="qsub $SXDEFECT_JOB"
+    fi
+fi
+echo "Submit command: $COMMAND"
 
 # 主处理循环
 for prefix in $FOLDER_PREFIXES; do

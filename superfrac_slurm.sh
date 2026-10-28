@@ -5,7 +5,7 @@
 #############################################
 check_dependencies() {
     echo ">>> Checking dependencies..."
-    for cmd in supercell atomkit sbatch; do
+    for cmd in supercell atomkit; do
         if ! command -v $cmd &> /dev/null; then
             echo "❌ Missing dependency: $cmd"
             echo "Please install or load module for $cmd before running."
@@ -13,6 +13,20 @@ check_dependencies() {
         fi
     done
     echo "✅ All dependencies OK."
+}
+
+# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
+# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
+detect_submit_cmd() {
+    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
+        echo "sbatch"
+    elif grep -q "^#PBS" "$1" 2>/dev/null; then
+        echo "qsub"
+    elif command -v sbatch >/dev/null 2>&1; then
+        echo "sbatch"
+    else
+        echo "qsub"
+    fi
 }
 
 #############################################
@@ -62,7 +76,12 @@ submit_vasp_jobs() {
     read -p "Enter folder containing *.vasp files (default: geo): " vasp_dir
     vasp_dir=${vasp_dir:-geo}
 
-    echo ">>> Submitting VASP jobs..."
+    local sub_cmd=$(detect_submit_cmd vasp_runscript)
+    if ! command -v "$sub_cmd" &> /dev/null; then
+        echo "❌ $sub_cmd not found; load the scheduler module first."
+        return 1
+    fi
+    echo ">>> Submitting VASP jobs ($sub_cmd)..."
     for vaspfile in "$vasp_dir"/*.vasp; do
         [ -e "$vaspfile" ] || continue
         name=$(basename "$vaspfile" .vasp)
@@ -71,7 +90,7 @@ submit_vasp_jobs() {
         cp "$vaspfile" "$name/POSCAR"
         cp INCAR POTCAR KPOINTS vasp_runscript "$name/"
         cd "$name" || exit
-        sbatch vasp_runscript
+        $sub_cmd vasp_runscript
         cd ..
     done
     echo "✅ VASP jobs submitted."

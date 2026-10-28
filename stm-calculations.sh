@@ -8,6 +8,17 @@ if [ "$#" -lt 2 ]; then
     exit 1
 fi
 
+# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
+    source "$_LIB_DIR/vasp_incar_lib.sh"
+elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
+    source "$(command -v vasp_incar_lib.sh)"
+else
+    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
+    exit 1
+fi
+
 # Check if the first argument is a file in the current directory
 if [ ! -f "./$1" ]; then
     echo "Error: The first argument must be the submission script in the current directory"
@@ -46,13 +57,15 @@ for i in "${@:2}"; do
     cd $folder
     ln -s ../WAVECAR .
     cd ..
-    # Add # in front of these keywords
-    sed -i '/^ICHARG\|^NEDOS\|^LORBIT/s/^/# /' "$folder"/INCAR
-    # Remove # in front of these keywords
-    sed -i '/^\s*#\s*ISTART/s/^#\s*//' "$folder"/INCAR
-    sed -i '/^\s*#\s*LWAVE/s/^#\s*//' "$folder"/INCAR
-    sed -i '/^\s*#\s*LCHARG/s/^#\s*//' "$folder"/INCAR
-    sed -i '/^\s*#\s*LPARD/s/^#\s*//' "$folder"/INCAR
+    # Comment out these keywords
+    incar_comment ICHARG "$folder"/INCAR
+    incar_comment NEDOS "$folder"/INCAR
+    incar_comment LORBIT "$folder"/INCAR
+    # Read the linked WAVECAR, never write through the link
+    incar_set ISTART 1 "$folder"/INCAR
+    incar_set LWAVE .FALSE. "$folder"/INCAR
+    incar_set LCHARG .FALSE. "$folder"/INCAR
+    incar_set LPARD .TRUE. "$folder"/INCAR
     # Specify the band index
     if ! [[ $i =~ $re ]]; then
         range=`echo $i | sed 's/-/ /g'`
@@ -93,20 +106,16 @@ for i in "${@:2}"; do
 			done
 		fi
 		eint="$(echo "$EINTMIN - 0.0001" | bc) $(echo "$EINTMAX + 0.0001" | bc)"
-		sed -i '/^\s*#\s*EINT/s/^#\s*//' "$folder"/INCAR
-		sed -i '/^\s*#\s*NBMOD/s/^#\s*//' "$folder"/INCAR
-		sed -i "s/^NBMOD = .*/NBMOD = -2 #/" $folder/INCAR
-		sed -i "s/^EINT = .*/EINT = $(echo $eint) #/" $folder/INCAR
+		incar_set NBMOD -2 "$folder"/INCAR
+		incar_set EINT "$(echo $eint)" "$folder"/INCAR
 		unset EINTMIN EINTMAX
 	else
 		iband=$(seq $range)
-		sed -i '/^\s*#\s*IBAND/s/^#\s*//' "$folder"/INCAR
-		sed -i "s/^IBAND = .*/IBAND = $(echo $iband) #/" $folder/INCAR
+		incar_set IBAND "$(echo $iband)" "$folder"/INCAR
 	fi
     else
         iband=$i
-	sed -i '/^\s*#\s*IBAND/s/^#\s*//' "$folder"/INCAR
-	sed -i "s/^IBAND = .*/IBAND = $(echo $iband) #/" $folder/INCAR
+	incar_set IBAND "$(echo $iband)" "$folder"/INCAR
     fi
 
 done

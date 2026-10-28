@@ -12,7 +12,7 @@ Usage:
 import numpy as np
 import argparse
 import sys
-from itertools import combinations
+from itertools import product
 
 
 def read_poscar(filename):
@@ -48,10 +48,21 @@ def read_poscar(filename):
     return lattice, coords, labels
 
 
-def min_image_dist(r1, r2, lattice):
-    diff = (r1 - r2) @ np.linalg.inv(lattice)
+# the 27 neighbouring cell translations (fractional)
+SHIFTS = np.array(list(product((-1, 0, 1), repeat=3)), dtype=float)
+
+
+def min_image_dists(frac, i, lattice):
+    """True minimum-image distances from atom i to atoms i+1..N-1.
+
+    Fractional differences are first reduced to [-0.5, 0.5); the shortest of the
+    27 neighbouring images is then taken, which is also correct for oblique
+    (hexagonal, monoclinic) cells where rounding alone overestimates distances.
+    """
+    diff = frac[i + 1:] - frac[i]
     diff -= np.round(diff)
-    return np.linalg.norm(diff @ lattice)
+    cart = (diff[:, None, :] + SHIFTS[None, :, :]) @ lattice   # (n, 27, 3)
+    return np.sqrt((cart ** 2).sum(axis=-1)).min(axis=1)
 
 
 def parse_pairs(pair_args):
@@ -80,11 +91,15 @@ def main():
     lattice, coords, labels = read_poscar(args.poscar)
 
     errors = []
-    for i, j in combinations(range(len(coords)), 2):
-        d = min_image_dist(coords[i], coords[j], lattice)
-        cut = pair_cutoffs.get(frozenset({labels[i], labels[j]}), args.cutoff)
-        if d < cut:
-            errors.append((i, j, d, labels[i], labels[j], cut))
+    frac = coords @ np.linalg.inv(lattice)
+    for i in range(len(coords) - 1):
+        dists = min_image_dists(frac, i, lattice)
+        for k in np.nonzero(dists < max([args.cutoff] + list(pair_cutoffs.values())))[0]:
+            j = i + 1 + int(k)
+            d = float(dists[k])
+            cut = pair_cutoffs.get(frozenset({labels[i], labels[j]}), args.cutoff)
+            if d < cut:
+                errors.append((i, j, d, labels[i], labels[j], cut))
 
     print(f"File: {args.poscar}  |  {len(coords)} atoms")
     if pair_cutoffs:

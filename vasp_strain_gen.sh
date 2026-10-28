@@ -93,8 +93,16 @@ apply_cartesian_strain() {
     [[ "$strain_directions" == *"Y"* ]] && fy=$strain_factor
     [[ "$strain_directions" == *"Z"* ]] && fz=$strain_factor
     
+    # Cartesian atomic coordinates are scaled the same way (Direct ones follow the cell)
     awk -v fx="$fx" -v fy="$fy" -v fz="$fz" '
         NR>=3 && NR<=5 { printf "  %20.12f%20.12f%20.12f\n", $1*fx, $2*fy, $3*fz; next }
+        NR==6 { cl = ($1 ~ /^[0-9]+$/) ? 6 : 7 }
+        NR==cl { nat = 0; for (i = 1; i <= NF; i++) nat += $i; ct = cl + 1 }
+        NR==ct && /^[ \t]*[Ss]/ { ct++; print; next }
+        NR==ct { cart = /^[ \t]*[CcKk]/; print; next }
+        cart && NR>ct && NR<=ct+nat {
+            rest = ""; for (i = 4; i <= NF; i++) rest = rest " " $i
+            printf "  %20.12f%20.12f%20.12f%s\n", $1*fx, $2*fy, $3*fz, rest; next }
         { print }' "$input_file" > "$output_file"
 }
 
@@ -238,6 +246,14 @@ generate_strain_values() {
     echo "$strain_list"
 }
 
+# Percent label: up to 4 decimals, trailing zeros dropped but at least one
+# decimal kept (1 -> 1.0, 0.05 -> 0.05, 0.125 -> 0.125), so names stay unique
+format_percent() {
+    local p=$(printf "%.4f" "$1")
+    p=$(echo "$p" | sed -e 's/0*$//' -e 's/\.$/.0/')
+    echo "$p"
+}
+
 # Function to create folder name from strain value
 create_folder_name() {
     local strain_directions="$1"
@@ -249,11 +265,11 @@ create_folder_name() {
     # Format with proper sign handling
     if (( $(echo "$strain_decimal >= 0" | bc -l) )); then
         # For positive values, add 'p' prefix
-        strain_percent=$(printf "%.1f" "$strain_percent")
+        strain_percent=$(format_percent "$strain_percent")
         local folder_name="strain_${strain_directions}_p${strain_percent}%"
     else
         # For negative values, use 'm' prefix and remove the minus sign
-        strain_percent=$(printf "%.1f" "${strain_percent#-}")  # Remove minus sign
+        strain_percent=$(format_percent "${strain_percent#-}")  # Remove minus sign
         local folder_name="strain_${strain_directions}_m${strain_percent}%"
     fi
     
@@ -269,10 +285,10 @@ create_strain_name() {
     
     # Format with proper sign handling
     if (( $(echo "$strain_decimal >= 0" | bc -l) )); then
-        strain_percent=$(printf "%.1f" "$strain_percent")
+        strain_percent=$(format_percent "$strain_percent")
         echo "p${strain_percent}"
     else
-        strain_percent=$(printf "%.1f" "${strain_percent#-}")
+        strain_percent=$(format_percent "${strain_percent#-}")
         echo "m${strain_percent}"
     fi
 }
@@ -446,10 +462,16 @@ for i in "${!strain_array[@]}"; do
     
     printf "\n%2d/%d. Processing: %s\n" $((i+1)) $total_folders "$folder_name"
     
-    # Create directory (remove if exists)
+    # Existing folder (may hold finished results): delete only on explicit confirmation
     if [ -d "$folder_name" ]; then
-        rm -rf "$folder_name"
-        print_warning "    Removed existing folder"
+        read -p "    Folder $folder_name already exists. Delete and regenerate it? (y/N): " overwrite
+        if [[ "$overwrite" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            rm -rf "$folder_name"
+            print_warning "    Removed existing folder"
+        else
+            print_warning "    Skipped (existing folder kept)"
+            continue
+        fi
     fi
     
     mkdir -p "$folder_name"

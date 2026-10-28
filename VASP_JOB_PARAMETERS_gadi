@@ -86,12 +86,12 @@ rename_files () {
 }
 
 remove_files (){
-
 	for ii in $REMOVE_RENAME_FILES ; do
-		rm $ii
+		if [ "$ii" = "REPORT" ] && keep_report ; then
+			continue
+		fi
+		rm -f $ii
 	done
-
-
 }
 
 print_band_gap (){
@@ -147,7 +147,7 @@ get_incar_tag() {
 			for (i=1; i<=n; i++) {
 				part=parts[i]
 				gsub(/^[[:space:]]+|[[:space:]]+$/, "", part)
-				if (part ~ "^" key "[[:space:]]*=") {
+				if (toupper(part) ~ "^" toupper(key) "[[:space:]]*=") {
 					sub("^[^=]*=[[:space:]]*", "", part)
 					split(part, value, /[[:space:]]+/)
 					print value[1]
@@ -158,9 +158,30 @@ get_incar_tag() {
 	' INCAR
 }
 
+# NSW missing or <= 0: static (single-point) run
+is_static_run() {
+	local nsw="$(get_incar_tag NSW || true)"
+	[[ -z "$nsw" ]] && return 0
+	[[ "$nsw" =~ ^-?[0-9]+$ ]] || return 1
+	(( nsw <= 0 ))
+}
+
+# REPORT holds MD / constrained-MD (blue-moon, slow-growth) / ML force-field data
+keep_report() {
+	local mdalgo="$(get_incar_tag MDALGO || true)"
+	local lmlff="$(get_incar_tag ML_LMLFF || true)"
+	local mlmode="$(get_incar_tag ML_MODE || true)"
+	[[ -n "$mdalgo" && "$mdalgo" != "0" ]] && return 0
+	[[ -f ICONST ]] && return 0
+	[[ "$lmlff" =~ ^\.?[Tt] ]] && return 0
+	[[ -n "$mlmode" ]] && return 0
+	return 1
+}
+
 check_completion() {
 	local outcar_file="$PWD/OUTCAR"
 	local mode_check="$(get_incar_tag IBRION || true)"
+	local nsw="$(get_incar_tag NSW || true)"
 
 	if [[ ! -f "$outcar_file" ]]; then
 		echo "$(date): Job failed - OUTCAR not found in $PWD" >> ~/vasp_fail_log
@@ -172,22 +193,25 @@ check_completion() {
 		return 1
 	fi
 
-	if [[ "$mode_check" =~ ^(0|5|6|7|8)$ ]]; then
-		# MD (IBRION=0) or finite-difference/DFPT (IBRION=5-8): no ionic convergence message
+	# Job type (same table in VASP_JOB_PARAMETERS_gadi and _slurm):
+	#   NSW missing or <= 0           -> static run: EDIFF only
+	#   IBRION 0/5/6/7/8 (or no IBRION
+	#   with NSW > 0, VASP default 0) -> MD / finite differences / DFPT: EDIFF only
+	#   IBRION 1/2/3/44               -> optimisation / IDM: "reached required accuracy"
+	#   anything else (-1, 11, ...)   -> EDIFF only
+	if is_static_run; then
 		if ! grep -q "EDIFF is reached" "$outcar_file"; then
-			echo "$(date): Job failed - IBRION=$mode_check did not meet criteria in $PWD" >> ~/vasp_fail_log
+			echo "$(date): Job failed - SCF did not converge in $PWD" >> ~/vasp_fail_log
 			return 1
 		fi
-	elif [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
-		# Optimization job
+	elif [[ "$mode_check" =~ ^(1|2|3|44)$ ]]; then
 		if ! grep -q "reached required accuracy" "$outcar_file" || ! grep -q "EDIFF is reached" "$outcar_file"; then
 			echo "$(date): Job failed - Optimization did not converge in $PWD" >> ~/vasp_fail_log
 			return 1
 		fi
 	else
-		# SCF job
 		if ! grep -q "EDIFF is reached" "$outcar_file"; then
-			echo "$(date): Job failed - SCF did not converge in $PWD" >> ~/vasp_fail_log
+			echo "$(date): Job failed - IBRION=${mode_check:-default} (NSW=$nsw) did not meet criteria in $PWD" >> ~/vasp_fail_log
 			return 1
 		fi
 	fi
@@ -210,8 +234,11 @@ final_act (){
 		bader_cal
 	fi
 
-	print_band_gap
-	print_dos
+	# band gap / DOS post-processing only for static runs (not relaxations or MD)
+	if is_static_run ; then
+		print_band_gap
+		print_dos
+	fi
 
 	if [ -e VASP_AUTO_SUBMISSION ] ; then
 		job_auto_submission

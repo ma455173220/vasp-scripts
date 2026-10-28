@@ -1,9 +1,22 @@
 #!/bin/bash
 # non_sc_calculation.sh
-# Sets up a Non-Self-Consistent (fixed-charge) VASP calculation from a converged SCF run.
-# Usage: Run in the directory containing a converged VASP calculation.
+# Sets up a static self-consistent run (NSW=0, IBRION=-1, denser k-mesh, writes
+# WAVECAR/CHGCAR/AECCAR) in NON-SC-kmesh-0.03/ from a converged relaxation.
+# (The directory name is historical: this is an SCF run, not ICHARG=11.)
+# Usage: Run in the directory containing a converged VASP relaxation.
 
 set -euo pipefail
+
+# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
+    source "$_LIB_DIR/vasp_incar_lib.sh"
+elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
+    source "$(command -v vasp_incar_lib.sh)"
+else
+    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
+    exit 1
+fi
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 NEW_DIRECTORY="NON-SC-kmesh-0.03"
@@ -40,10 +53,12 @@ declare -a CANDIDATE_SCRIPTS=()
 declare -a CANDIDATE_SCHEDULERS=()
 
 while IFS= read -r -d '' f; do
-    if grep -ql "^#PBS" "$f" 2>/dev/null; then
+    # only the first 4 KB of each file is read (runscript_scheduler)
+    sched=$(runscript_scheduler "$f" || true)
+    if [[ "$sched" == "PBS" ]]; then
         CANDIDATE_SCRIPTS+=("$(realpath "$f")")
         CANDIDATE_SCHEDULERS+=("PBS")
-    elif grep -ql "^#SBATCH" "$f" 2>/dev/null; then
+    elif [[ "$sched" == "SLURM" ]]; then
         CANDIDATE_SCRIPTS+=("$(realpath "$f")")
         CANDIDATE_SCHEDULERS+=("Slurm")
     fi
@@ -106,17 +121,16 @@ check_d_f_elements() {
 
     # Extract element symbols from line 6 (VASP5 format)
     local elements
-    mapfile -t elements < <(awk 'NR==6 {for (i=1; i<=NF; i++) print $i}' "$poscar")
+    mapfile -t elements < <(poscar_species "$poscar")   # Ti_pv/<hash> -> Ti
 
     # d-block (Groups 3–12, common subset — extend as needed)
     local d_elements=(Sc Ti V Cr Mn Fe Co Ni Cu Zn
                       Y Zr Nb Mo Tc Ru Rh Pd Ag Cd
-                      Hf Ta W Re Os Ir Pt Au Hg
-                      La Hg)
+                      Hf Ta W Re Os Ir Pt Au Hg)
     # Lanthanides
     local lanthanides=(La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu)
     # Actinides
-    local actinides=(Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr)
+    local actinides=(Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr)
 
     local transition_elements=("${d_elements[@]}" "${lanthanides[@]}" "${actinides[@]}")
 
@@ -162,18 +176,18 @@ file_editor() {
 
     # ── INCAR modifications ──
     # Set NSW=0 and IBRION=-1 for non-SCF (static) run
-    sed -i '/^NSW/       s/=.*/=  0       #(Non SCF calculation)/'   "$incar"
-    sed -i '/^IBRION/    s/=.*/=  -1      #(Non SCF calculation)/'   "$incar"
+    incar_set NSW 0 "$incar" "(Non SCF calculation)"
+    incar_set IBRION -1 "$incar" "(Non SCF calculation)"
     # Comment out NELMIN (not meaningful for non-SCF)
-    sed -i '/^NELMIN/    s/^/# /'                                     "$incar"
+    incar_comment NELMIN "$incar"
     # Ensure wavefunctions and charge density are written
-    sed -i 's/\(#\s*\)\?\s*LWAVE\s*=.*/LWAVE  =  .TRUE.   #(Write WAVECAR)/'  "$incar"
-    sed -i 's/\(#\s*\)\?\s*LCHARG\s*=.*/LCHARG =  .TRUE.   #(Write CHGCAR)/'  "$incar"
-    sed -i 's/\(#\s*\)\?\s*LAECHG\s*=.*/LAECHG =  .TRUE.   #(Bader charge)/'  "$incar"
+    incar_set LWAVE .TRUE. "$incar" "(Write WAVECAR)"
+    incar_set LCHARG .TRUE. "$incar" "(Write CHGCAR)"
+    incar_set LAECHG .TRUE. "$incar" "(Bader charge)"
 
-    # Append DOS-related tags only if not already present
-    grep -q '^LORBIT' "$incar" || echo "LORBIT =  11    #(PAW radii for projected DOS)" >> "$incar"
-    grep -q '^NEDOS'  "$incar" || echo "NEDOS  =  2001  #(DOSCAR points)"               >> "$incar"
+    # DOS-related tags only if not already active
+    incar_get LORBIT "$incar" >/dev/null || incar_set LORBIT 11 "$incar" "(PAW radii for projected DOS)"
+    incar_get NEDOS "$incar" >/dev/null || incar_set NEDOS 2001 "$incar" "(DOSCAR points)"
 
     # ── Generate denser k-mesh with vaspkit (run inside NEW_DIRECTORY) ──
     if command -v vaspkit &>/dev/null; then
@@ -195,7 +209,7 @@ file_editor() {
 
     # ── Summary ──
     echo "INCAR key settings after modification:"
-    grep -E "^NSW|^IBRION" "$incar" | awk -F "#" '{print "  " $1}'
+    grep -iE "^[[:space:]]*(NSW|IBRION)[[:space:]]*=" "$incar" | awk -F "#" '{print "  " $1}'
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

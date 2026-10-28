@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script is used to create directories for different strains and submit jobs to qsub
+# This script is used to create directories for different strains and submit jobs (qsub or sbatch)
 
 # Define input files
 input_file="INCAR POSCAR POTCAR KPOINTS"
@@ -52,6 +52,21 @@ then
 	exit 1
 fi
 
+# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
+# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
+detect_submit_cmd() {
+    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
+        echo "sbatch"
+    elif grep -q "^#PBS" "$1" 2>/dev/null; then
+        echo "qsub"
+    elif command -v sbatch >/dev/null 2>&1; then
+        echo "sbatch"
+    else
+        echo "qsub"
+    fi
+}
+SUB_CMD=$(detect_submit_cmd "$runscript")
+
 # Choose the shear strain direction
 read -p "Please select the strain direction (XX, YY, ZZ, XY, XZ, YZ): " shear_strain_direction
 
@@ -83,7 +98,7 @@ echo -e "${ORANGE}..............................................................
 read -p "Submit all jobs? [Y/n]" choice
 
 if [[ $choice == "Y" || $choice == "y" ]]; then
-	# Loop through the arguments and submit jobs to qsub
+	# Loop through the arguments and submit jobs ($SUB_CMD)
 	for arg in "$@"
 	do
 		if [ -d "strain_$arg" ] && [ -n "$(find "strain_$arg" -maxdepth 1 -name '*OUTCAR' -print -quit)" ]; then
@@ -94,7 +109,7 @@ if [[ $choice == "Y" || $choice == "y" ]]; then
 
 		cd "strain_$arg"
 		echo -e "${GREEN}Submitting job for strain $arg..."
-		qsub $runscript
+		$SUB_CMD $runscript
 		echo -e "${ORANGE}.............................................................................."
 		cd ..
 	done

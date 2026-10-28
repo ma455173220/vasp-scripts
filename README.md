@@ -13,6 +13,7 @@ VASP 计算辅助脚本（Gadi PBS 和 Setonix Slurm 都能用）。
 | `vasp_runscript_setonix` | Setonix Slurm 作业模板（VASP 6.4.3） |
 | `VASP_JOB_PARAMETERS_slurm` / `VASP_JOB_PARAMETERS_gadi` | 由 runscript `source`：作业结束时备份并重命名输出、判断是否收敛、写 `~/vasp_job_log`、Bader、带隙和 DOS |
 | `vasp_incar` | 带注释的 INCAR 总模板（band/dos/soc/stm 脚本会取消其中 `# KEY` 行的注释） |
+| `vasp_incar_lib.sh` | 共享函数（被其他脚本 `source`，需与脚本同目录或在 `PATH` 中）：`incar_get/incar_set/incar_comment`（不区分大小写、保留注释、处理 `;` 行、不留重复标签）、`poscar_species`、`poscar_vacuum_c`、`runscript_scheduler` |
 | `vasp_clean.sh` | 递归删除大文件（⚠️ WAVECAR/CHGCAR/`*_hr.dat`，不会确认） |
 | `jobtrack/` | 作业提交记录与 fzf 浏览工具（PBS/Slurm/本地），见 `jobtrack/README.md` |
 

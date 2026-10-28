@@ -13,7 +13,24 @@ EOL
     exit 1
 }
 
-SUBMISSION_SCRIPT=$(grep -l -E "^#(PBS|SBATCH)" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
+# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
+    source "$_LIB_DIR/vasp_incar_lib.sh"
+elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
+    source "$(command -v vasp_incar_lib.sh)"
+else
+    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
+    exit 1
+fi
+
+# Submission script(s): files whose first 4 KB contain #PBS / #SBATCH (big outputs are not read)
+SUBMISSION_SCRIPT=""
+for f in *; do
+    [ -f "$f" ] || continue
+    case "$f" in CHGCAR|CHG|WAVECAR|vasprun.xml|vaspout.h5|PROCAR|POTCAR|DOSCAR|OUTCAR|*_OUTCAR|XDATCAR|AECCAR*|LOCPOT|ELFCAR) continue ;; esac
+    runscript_scheduler "$f" >/dev/null && SUBMISSION_SCRIPT="${SUBMISSION_SCRIPT:+$SUBMISSION_SCRIPT }$f"
+done
 [ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found in $PWD"
 COPY_FILES_NEEDED="INCAR POSCAR POTCAR $SUBMISSION_SCRIPT"
 LN_FILES_NEEDED="CHGCAR"
@@ -53,20 +70,19 @@ ln_file() {
 # Define the file_editor function
 file_editor() {
     cd "$NEW_DIRECTORY"
-    sed -i '0,/# ICHARG/ s/# ICHARG/ICHARG/' INCAR
-    sed -i '0,/LAECHG/ s/LAECHG/# LAECHG/' INCAR
-    sed -i '/^ICHARG/ s/=.*#/=  11            #/' INCAR
-    sed -i '/^NSW/ s/=.*#/=  0            #/' INCAR
-    sed -i '/^IBRION/ s/=.*#/=  -1            #/' INCAR
-    sed -i '0,/# LWAVE/ s/# LWAVE/LWAVE/' INCAR
-    sed -i '/^LWAVE/ s/=.*#/=  .FALSE.            #/' INCAR
-    sed -i '0,/# LCHARG/ s/# LCHARG/LCHARG/' INCAR
-    sed -i '/^LCHARG/ s/=.*#/=  .FALSE.            #/' INCAR
-    sed -i '0,/# LORBIT/ s/# LORBIT/LORBIT/' INCAR
-    sed -i '/^LORBIT/ s/=.*#/=  11            #/' INCAR
-    sed -i '0,/# NEDOS/ s/# NEDOS/NEDOS/' INCAR
-    sed -i '/^NEDOS/ s/=.*#/=  3000            #/' INCAR
-    grep -E "^NSW|^LORBIT|^IBRION|^LCHARG|^LWAVE|^ICHARG" INCAR | awk -F "#" '{print $1}'
+    incar_set ICHARG 11
+    incar_comment LAECHG
+    incar_set NSW 0
+    incar_set IBRION -1
+    incar_set LWAVE .FALSE.
+    incar_set LCHARG .FALSE.
+    incar_set LORBIT 11
+    incar_set NEDOS 3000
+    grep -iE "^[[:space:]]*(NSW|LORBIT|IBRION|LCHARG|LWAVE|ICHARG)[[:space:]]*=" INCAR | awk -F "#" '{print $1}'
+    if [[ "$(incar_get ICHARG)" != "11" || "$(incar_get NSW)" != "0" ]]; then
+        echo -e "\033[31mERROR:\033[0m INCAR in $NEW_DIRECTORY does not have ICHARG = 11 / NSW = 0 after editing. Aborting."
+        exit 1
+    fi
     cd ..
 }
 
@@ -76,10 +92,8 @@ file_editor_energy_range() {
     cd "$NEW_DIRECTORY"
     # Check if both E1 and E2 arguments are provided
     if [[ -n "$2" && -n "$3" ]]; then
-        sed -i "0,/# EMIN/ s/# EMIN/EMIN/" INCAR
-        sed -i "/^EMIN/ s/=.*#/=  $2            #/" INCAR
-        sed -i "0,/# EMAX/ s/# EMAX/EMAX/" INCAR
-        sed -i "/^EMAX/ s/=.*#/=  $3            #/" INCAR
+        incar_set EMIN "$2"
+        incar_set EMAX "$3"
         echo "EMIN set to $2, EMAX set to $3 in INCAR"
     else
         echo -e "\033[31mERROR:\033[0m Missing arguments for -e flag. Usage: sh script.sh -e E1 E2"

@@ -7,6 +7,20 @@
 # Auto-generate workflow execution script
 # =====================================================
 
+# ===== Shared INCAR helpers (incar_get / incar_set / incar_comment / poscar_species) =====
+# Looked up next to this script first, then on PATH
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
+    INCAR_LIB="$_LIB_DIR/vasp_incar_lib.sh"
+else
+    INCAR_LIB=$(command -v vasp_incar_lib.sh 2>/dev/null)
+fi
+if [ -z "$INCAR_LIB" ]; then
+    echo "❌ vasp_incar_lib.sh not found (next to this script or on PATH)"
+    exit 1
+fi
+source "$INCAR_LIB"
+
 # ===== DEPENDENCY CHECK =====
 echo "============================================================"
 echo ">>> CHECKING EXTERNAL DEPENDENCIES"
@@ -157,30 +171,11 @@ update_key() {
     local value=$3
     local comment=$4
 
-    active_count=$(grep -i "^[[:space:]]*$key[[:space:]]*=" "$file" | wc -l)
-
-    if (( active_count > 1 )); then
-        echo "⚠️ Multiple active $key found in $file. Keeping first and commenting out others."
-        awk -v key="$key" '
-        BEGIN{IGNORECASE=1; count=0}
-        {
-            if ($0 ~ "^[[:space:]]*"key"[[:space:]]*=") {
-                count++
-                if (count > 1) {
-                    sub(/^([[:space:]]*)/, "&#")
-                    print $0
-                } else {
-                    print $0
-                }
-            } else {
-                print $0
-            }
-        }' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
-    fi
-
+    # vasp_incar_lib.sh: case-insensitive, keeps template comments, never leaves
+    # two active copies of a tag, appends the tag if it is not in the file at all
     if [[ "$value" == "COMMENT" ]]; then
-        if grep -qi "^[[:space:]]*$key[[:space:]]*=" "$file"; then
-            sed -i "0,/^[[:space:]]*$key[[:space:]]*=/s//\#&/" "$file"
+        if incar_get "$key" "$file" >/dev/null; then
+            incar_comment "$key" "$file"
             echo "🔧 $key commented in $file"
         else
             echo "ℹ️ $key not found in $file, nothing to comment"
@@ -188,11 +183,11 @@ update_key() {
         return
     fi
 
-    if grep -qi "$key" "$file"; then
-        sed -i "0,/^\(#\s*\)\?\s*$key\s*=.*/s//${key} = ${value}    #${comment}/" "$file"
+    if incar_get "$key" "$file" >/dev/null || grep -qiE "^[[:space:]]*[#!]+[[:space:]]*${key}[[:space:]]*=" "$file"; then
+        incar_set "$key" "$value" "$file" "$comment"
         echo "🔧 $key set to $value in $file"
     else
-        echo "${key} = ${value}    #${comment}" >> "$file"
+        incar_set "$key" "$value" "$file" "$comment"
         echo "➕ $key added as $value in $file"
     fi
 }
@@ -360,11 +355,11 @@ update_key INCAR_scf "ICORELEVEL" "1" "Core energies"
 echo ">>> STEP 4: LMAXMIX Adjustment based on POSCAR"
 if [ -f "POSCAR" ]; then
     echo "Checking elements in POSCAR for LMAXMIX adjustment..."
-    elements=$(awk 'NR==6 {for (i=1; i<=NF; i++) print $i}' POSCAR)
+    elements=$(poscar_species POSCAR)   # Ti_pv/<hash> -> Ti
 
-    d_elements=("Sc" "Ti" "V" "Cr" "Mn" "Fe" "Co" "Ni" "Cu" "Zn" "Y" "Zr" "Nb" "Mo" "Tc" "Ru" "Rh" "Pd" "Ag" "Cd" "W" "Pt" "Au" "Hg")
+    d_elements=("Sc" "Ti" "V" "Cr" "Mn" "Fe" "Co" "Ni" "Cu" "Zn" "Y" "Zr" "Nb" "Mo" "Tc" "Ru" "Rh" "Pd" "Ag" "Cd" "Hf" "Ta" "W" "Re" "Os" "Ir" "Pt" "Au" "Hg")
     lanthanides=("La" "Ce" "Pr" "Nd" "Pm" "Sm" "Eu" "Gd" "Tb" "Dy" "Ho" "Er" "Tm" "Yb" "Lu")
-    actinides=("Th" "Pa" "U" "Np" "Pu" "Am" "Cm" "Bk" "Cf" "Es" "Fm" "Md" "No" "Lr")
+    actinides=("Ac" "Th" "Pa" "U" "Np" "Pu" "Am" "Cm" "Bk" "Cf" "Es" "Fm" "Md" "No" "Lr")
 
     contains_d=false
     contains_f=false
@@ -401,8 +396,19 @@ update_key INCAR_band "LAECHG" ".FALSE." "Disable AECCAR"
 update_key INCAR_band "ICORELEVEL" "COMMENT" "Core energies"
 update_key INCAR_band "LVHAR" "COMMENT"    "Write total local potential"
 echo ">>> STEP 7: Generating KPOINTS_band"
-echo -e "303\n" | vaspkit > /dev/null 2>&1
+# 2D (largest vacuum gap along c > 8 Å) -> vaspkit 302, bulk -> 303; override with KPATH_TASK=302/303
+VACUUM_C=$(poscar_vacuum_c POSCAR)
+if [[ -n "$KPATH_TASK" ]]; then
+    kpath_task="$KPATH_TASK"
+elif awk -v v="$VACUUM_C" 'BEGIN { exit !(v > 8) }'; then
+    kpath_task=302
+else
+    kpath_task=303
+fi
+echo "🔍 Largest vacuum gap along c: ${VACUUM_C} Å → vaspkit ${kpath_task} ($([ "$kpath_task" = 302 ] && echo 2D || echo bulk) k-path)"
+echo -e "${kpath_task}\n" | vaspkit > /dev/null 2>&1
 mv KPATH.in KPOINTS_band
+echo "⚠️ KPATH.in is for vaspkit's standardised cell (PRIMCELL.vasp); check that it matches the relaxed POSCAR."
 echo "🔧 KPOINTS_band generated."
 cp "$RUNSCRIPT_BASE" "${RUNSCRIPT_BASE}_band"
 update_runscript "${RUNSCRIPT_BASE}_band" "04" "KPOINTS_band" "$PREFIX"
@@ -480,6 +486,7 @@ JOB_NAME="${PREFIX}_workflow"
 # Whether to apply dipole correction (1 = enable, 0 = disable)
 USE_DIPOL_CORR=${USE_DIPOL_CORR}
 COM_SCRIPT="${COM_SCRIPT}"  # center-of-mass.py (resolved by the generator; PATH used if missing)
+INCAR_LIB="${INCAR_LIB}"    # vasp_incar_lib.sh (resolved by the generator; PATH used if missing)
 
 # ===== Submission script base name (customize here) =====
 RUNSCRIPT_BASE="$RUNSCRIPT_BASE"  # Change this prefix to customize submission script names
@@ -500,6 +507,22 @@ echo "Hostname: \$(hostname)" >> "\$LOGFILE"
 echo "Selected Steps: \${RUN_STEPS[@]}" >> "\$LOGFILE"
 
 ##############################################
+# ===== FUNCTION: Is the job still queued/running? =====
+# qstat exit status: 0 = known to the server; "finished"/"Unknown Job Id" = done.
+# Any other qstat error is retried 3 times before the job is assumed finished.
+##############################################
+job_running() {
+    local jobid=\$1 out rc try
+    for try in 1 2 3; do
+        out=\$(qstat "\$jobid" 2>&1); rc=\$?
+        [[ \$rc -eq 0 ]] && return 0
+        echo "\$out" | grep -qiE "finished|Unknown Job" && return 1
+        sleep 30
+    done
+    return 1
+}
+
+##############################################
 # ===== FUNCTION: Check Job Completion =====
 # Waits for a submitted job to finish and checks OUTCAR for convergence
 # \$1 → Step number
@@ -513,9 +536,14 @@ check_job_done() {
     local check_mode=\$3
     local workdir=\$4
 
+    if [[ -z "\$jobid" ]]; then
+        echo "❌ Step \$step: job submission failed (no job ID)." >> "\$LOGFILE"
+        exit 1
+    fi
+
     while true; do
         # Wait while job is still in queue
-        if qstat \$jobid 2>/dev/null | grep -q "\$jobid"; then
+        if job_running "\$jobid"; then
             sleep 60
         else
             OUTCAR_FILE="\$workdir/OUTCAR"
@@ -553,7 +581,11 @@ set_dipol() {
         echo "❌ center-of-mass.py gave no result in \$(pwd); DIPOL not set." >> "\$LOGFILE"
         return 1
     fi
-    sed -i "s/^DIPOL *=.*/DIPOL = \$com/" INCAR
+    if [ -f "\$INCAR_LIB" ] || INCAR_LIB=\$(command -v vasp_incar_lib.sh 2>/dev/null); then
+        ( source "\$INCAR_LIB" && incar_set DIPOL "\$com" INCAR )
+    else
+        sed -i -E "s/^[[:space:]]*DIPOL[[:space:]]*=.*/DIPOL = \$com/I" INCAR
+    fi
 }
 EOL
 
@@ -635,7 +667,12 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cp INCAR_scf "$SCF_DIR/INCAR"
     cp KPOINTS_scf "$SCF_DIR/KPOINTS"
     cp POTCAR "$SCF_DIR/"
-    cp CONTCAR "$SCF_DIR/POSCAR"
+    if [ -s CONTCAR ]; then
+        cp CONTCAR "$SCF_DIR/POSCAR"
+    else
+        echo "ℹ️ No CONTCAR here (no optimisation run in this directory); using POSCAR for SCF" >> "$LOGFILE"
+        cp POSCAR "$SCF_DIR/POSCAR"
+    fi
     cd "$SCF_DIR"
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then

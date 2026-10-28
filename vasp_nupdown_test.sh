@@ -28,8 +28,8 @@
 # Configurable Variables
 # ============================
 SUBMISSION_SCRIPT="vasp_runscript"
-SUBMISSION_CMD="sbatch"
-DEFECT_PATH="v_O*"
+SUBMISSION_CMD="${SUBMISSION_CMD:-}"   # empty: sbatch/qsub from the runscript header
+DEFECT_PATH="${DEFECT_PATH:-v_O*}"     # override: DEFECT_PATH="v_S*" bash vasp_nupdown_test.sh
 SUMMARY_LOG="summary.csv"
 
 root_dir=$PWD
@@ -38,16 +38,31 @@ root_dir=$PWD
 # Check environment and files
 # ============================
 
-# Check sbatch command
-if ! command -v "$SUBMISSION_CMD" &> /dev/null; then
-    echo "❌ ERROR: $SUBMISSION_CMD command not found. Please load your scheduler module or check PATH."
-    exit 1
-fi
+# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
+# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
+detect_submit_cmd() {
+    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
+        echo "sbatch"
+    elif grep -q "^#PBS" "$1" 2>/dev/null; then
+        echo "qsub"
+    elif command -v sbatch >/dev/null 2>&1; then
+        echo "sbatch"
+    else
+        echo "qsub"
+    fi
+}
 
 # Check submission script exists
 if [[ ! -f "$SUBMISSION_SCRIPT" ]]; then
     echo "❌ ERROR: Submission script '$SUBMISSION_SCRIPT' not found in current directory."
     echo "Please make sure it exists here: $root_dir"
+    exit 1
+fi
+
+# Check submit command (PBS or Slurm)
+[[ -z "$SUBMISSION_CMD" ]] && SUBMISSION_CMD=$(detect_submit_cmd "$SUBMISSION_SCRIPT")
+if ! command -v "$SUBMISSION_CMD" &> /dev/null; then
+    echo "❌ ERROR: $SUBMISSION_CMD command not found. Please load your scheduler module or check PATH."
     exit 1
 fi
 

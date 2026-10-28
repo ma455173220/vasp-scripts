@@ -75,8 +75,14 @@ echo "Starting setup for $calc_mode..."
 
 # 1. Create Gibbs folder
 if [ -d "$folder_name" ]; then
-    echo "Warning: $folder_name folder already exists, will remove and recreate"
-    rm -rf "$folder_name"
+    echo "Warning: $folder_name folder already exists (it may hold a finished calculation)"
+    read -p "Delete it and recreate? [y/N]: " confirm_rm
+    if [[ "$confirm_rm" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+        rm -rf "$folder_name"
+    else
+        echo "Keeping existing $folder_name - nothing done."
+        exit 1
+    fi
 fi
 mkdir "$folder_name"
 echo "Created $folder_name folder"
@@ -137,7 +143,8 @@ if [ "$use_dipole" = true ]; then
     echo "Modifying INCAR file..."
     if [ -f "INCAR" ]; then
         # Only modify DIPOL line (not affecting LDIPOL and IDIPOL)
-        sed -i "s/^DIPOL\s*=.*/DIPOL = $dipol/" INCAR
+        # case-insensitive, tolerates indentation
+        sed -i -E "s/^[[:space:]]*DIPOL[[:space:]]*=.*/DIPOL = $dipol/I" INCAR
         echo "Updated DIPOL = $dipol"
     else
         echo "Error: INCAR file does not exist"
@@ -147,9 +154,9 @@ else
     # Comment out dipole-related parameters in INCAR
     echo "Disabling dipole correction in INCAR..."
     if [ -f "INCAR" ]; then
-        sed -i 's/^DIPOL\s*=/#DIPOL =/' INCAR
-        sed -i 's/^LDIPOL\s*=/#LDIPOL =/' INCAR
-        sed -i 's/^IDIPOL\s*=/#IDIPOL =/' INCAR
+        sed -i -E 's/^[[:space:]]*DIPOL[[:space:]]*=/#DIPOL =/I' INCAR
+        sed -i -E 's/^[[:space:]]*LDIPOL[[:space:]]*=/#LDIPOL =/I' INCAR
+        sed -i -E 's/^[[:space:]]*IDIPOL[[:space:]]*=/#IDIPOL =/I' INCAR
         echo "Commented out DIPOL, LDIPOL, IDIPOL"
     else
         echo "Error: INCAR file does not exist"
@@ -263,7 +270,7 @@ echo ""
 echo "=== Key INCAR Parameters ==="
 grep -E "^(NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
 if [ "$use_dipole" = true ]; then
-    grep "^DIPOL" INCAR
+    grep -iE "^[[:space:]]*DIPOL" INCAR
 fi
 if [ "$nwrite_value" != "default" ]; then
     grep "^NWRITE" INCAR
