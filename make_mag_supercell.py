@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-make_supercell.py
+make_mag_supercell.py
 -----------------
 从 primitive cell 建超胞，并根据原胞的 MAGMOM 自动生成超胞的 MAGMOM。
 
@@ -11,19 +11,19 @@ make_supercell.py
 
 用法：
     # 最常用：2x2x2 超胞
-    python make_supercell.py -f POSCAR --supercell 2 2 2
+    python make_mag_supercell.py -f POSCAR --supercell 2 2 2
 
     # 非等比扩胞
-    python make_supercell.py -f POSCAR --supercell 2 2 1
+    python make_mag_supercell.py -f POSCAR --supercell 2 2 1
 
     # 自定义矩阵扩胞（适合斜方超胞）
-    python make_supercell.py -f POSCAR --matrix "2 0 0 / 0 2 0 / 0 0 2"
+    python make_mag_supercell.py -f POSCAR --matrix "2 0 0 / 0 2 0 / 0 0 2"
 
     # 指定 MAGMOM（原胞原子顺序，空格分隔）
-    python make_supercell.py -f POSCAR --supercell 2 2 2 --magmom "4 -4 0 0 0 0 0 0 0"
+    python make_mag_supercell.py -f POSCAR --supercell 2 2 2 --magmom "4 -4 0 0 0 0 0 0 0"
 
-    # 只打印 MAGMOM，不写文件
-    python make_supercell.py -f POSCAR --supercell 2 2 2 --no-export
+    # 同时写出超胞 POSCAR（默认只打印 MAGMOM，不写文件）
+    python make_mag_supercell.py -f POSCAR --supercell 2 2 2 --export
 
 依赖：
     pip install ase spglib numpy

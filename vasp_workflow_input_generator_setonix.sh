@@ -118,6 +118,14 @@ fi
 
 ROOT_DIR=$(pwd)
 
+# center-of-mass.py: this script's directory first, then PATH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/center-of-mass.py" ]; then
+    COM_SCRIPT="$SCRIPT_DIR/center-of-mass.py"
+else
+    COM_SCRIPT=$(command -v center-of-mass.py 2>/dev/null)
+fi
+
 # ===== Configurable variable for runscript base name =====
 RUNSCRIPT_BASE="vasp_runscript"  # Change this prefix to customize submission script names
                                  # Scripts will be ${RUNSCRIPT_BASE}_step0, ${RUNSCRIPT_BASE}_step1, ${RUNSCRIPT_BASE}_scf, etc.
@@ -326,10 +334,10 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         exit 1
     fi
     echo "✅ INCAR contains LDIPOL, IDIPOL, and DIPOL."
-    if ! command -v center-of-mass.py >/dev/null 2>&1; then
-        echo "⚠️  center-of-mass.py not found in PATH — dipole correction will fail at runtime."
+    if [ -z "$COM_SCRIPT" ]; then
+        echo "⚠️  center-of-mass.py not found (script dir or PATH) — dipole correction will fail at runtime."
     else
-        echo "✅ center-of-mass.py found."
+        echo "✅ center-of-mass.py found: $COM_SCRIPT"
     fi
 else
     USE_DIPOL_CORR=0
@@ -543,6 +551,7 @@ JOB_NAME="${PREFIX}_workflow"
 
 # Whether to apply dipole correction (1 = enable, 0 = disable)
 USE_DIPOL_CORR=${USE_DIPOL_CORR}
+COM_SCRIPT="${COM_SCRIPT}"  # center-of-mass.py (resolved by the generator; PATH used if missing)
 
 # ===== Submission script base name (customize here) =====
 RUNSCRIPT_BASE="$RUNSCRIPT_BASE"  # Change this prefix to customize submission script names
@@ -605,6 +614,23 @@ check_job_done() {
     done
 }
 
+##############################################
+# ===== FUNCTION: Set DIPOL from center of mass =====
+# Runs center-of-mass.py on ./POSCAR and writes DIPOL into ./INCAR
+##############################################
+set_dipol() {
+    local com_script="\$COM_SCRIPT"
+    [ -f "\$com_script" ] || com_script=\$(command -v center-of-mass.py 2>/dev/null)
+    local com=""
+    [ -n "\$com_script" ] && com=\$(python3 "\$com_script" POSCAR | awk -F'[][]' '/Center of mass/{print \$2}')
+    if [ -z "\$com" ]; then
+        echo "❌ center-of-mass.py not found or gave no result in \$(pwd); DIPOL not set." >> "\$LOGFILE"
+        { echo "==============================================="; echo "=== WORKFLOW FAILED at \$(date '+%Y-%m-%d %H:%M:%S') ==="; echo "DIPOL: center-of-mass.py failed"; echo "Dir: \$(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log
+        return 1
+    fi
+    sed -i "s/^DIPOL *=.*/DIPOL = \$com/" INCAR
+}
+
 EOL
 
 if [ "$PERFORM_STEP0" = true ]; then
@@ -619,8 +645,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 0 " ]]; then
     cp KPOINTS_step0 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID0=$($SUB_CMD ${RUNSCRIPT_BASE}_step0 | awk '{print $NF}')
     check_job_done 0 $JOBID0 "opt" "$ROOT_DIR"
@@ -653,8 +678,7 @@ fi
 cat >> "$WORKFLOW_SCRIPT" << 'EOL'
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID1=$($SUB_CMD ${RUNSCRIPT_BASE}_step1 | awk '{print $NF}')
     check_job_done 1 $JOBID1 "opt" "$ROOT_DIR"
@@ -671,8 +695,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 2 " ]]; then
     cp KPOINTS_step2 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID2=$($SUB_CMD ${RUNSCRIPT_BASE}_step2 | awk '{print $NF}')
     check_job_done 2 $JOBID2 "opt" "$ROOT_DIR"
@@ -692,8 +715,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cd "$SCF_DIR" || { echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Failed to enter $SCF_DIR" >> "$LOGFILE"; { echo "==============================================="; echo "=== WORKFLOW FAILED at $(date '+%Y-%m-%d %H:%M:%S') ==="; echo "cd failed: $SCF_DIR"; echo "Dir: $(pwd)"; echo "==============================================="; } >> ~/vasp_workflow_fail_log; exit 1; }
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID3=$($SUB_CMD ${RUNSCRIPT_BASE}_scf | awk '{print $NF}')
     check_job_done 3 $JOBID3 "scf" "$SCF_DIR"
@@ -715,8 +737,7 @@ run_band() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_band" ${RUNSCRIPT_BASE}_band
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID4=$($SUB_CMD ${RUNSCRIPT_BASE}_band | awk '{print $NF}')
     check_job_done 4 $JOBID4 "scf" "$BAND_DIR"
@@ -738,8 +759,7 @@ run_dos() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_dos" ${RUNSCRIPT_BASE}_dos
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID5=$($SUB_CMD ${RUNSCRIPT_BASE}_dos | awk '{print $NF}')
     check_job_done 5 $JOBID5 "scf" "$DOS_DIR"

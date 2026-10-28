@@ -3,10 +3,10 @@
 Check for atoms too close in a VASP POSCAR/CONTCAR.
 
 Usage:
-  python check_close_atoms.py                        # default cutoff 1.5 Å
-  python check_close_atoms.py CONTCAR --cutoff 1.0
-  python check_close_atoms.py --pair Mo-Se:2.4 --pair Se-Se:3.0
-  python check_close_atoms.py --cutoff 1.5 --pair Mo-Se:2.4
+  python atomic_distance_checker.py                        # default cutoff 1.5 Å
+  python atomic_distance_checker.py CONTCAR --cutoff 1.0
+  python atomic_distance_checker.py --pair Mo-Se:2.4 --pair Se-Se:3.0
+  python atomic_distance_checker.py --cutoff 1.5 --pair Mo-Se:2.4
 """
 
 import numpy as np
@@ -22,14 +22,18 @@ def read_poscar(filename):
     lattice = np.array([[float(x) for x in lines[i].split()] for i in range(2, 5)]) * scale
     elem_line = lines[5].split()
     try:
+        # VASP4: no species line, line 6 holds the counts
         float(elem_line[0])
         counts = [int(x) for x in elem_line]
         elements = [f"X{i}" for i in range(len(counts))]
         coord_line = 6
     except ValueError:
-        elements = elem_line
+        # VASP5/6: strip POTCAR suffixes such as Ti_pv or Ti_pv/<hash>
+        elements = [e.split("/")[0].split("_")[0] for e in elem_line]
         counts = [int(x) for x in lines[6].split()]
         coord_line = 7
+    if lines[coord_line].strip()[0].lower() == 's':  # Selective dynamics
+        coord_line += 1
     coord_type = lines[coord_line].strip()[0].lower()
     coords, labels = [], []
     for elem, count in zip(elements, counts):
@@ -37,7 +41,9 @@ def read_poscar(filename):
             coords.append([float(x) for x in lines[coord_line + 1 + len(coords)].split()[:3]])
             labels.append(elem)
     coords = np.array(coords)
-    if coord_type == 'd':
+    if coord_type in ('c', 'k'):   # Cartesian coordinates are scaled too
+        coords = coords * scale
+    else:                          # Direct
         coords = coords @ lattice
     return lattice, coords, labels
 

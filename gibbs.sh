@@ -6,6 +6,14 @@ echo "  VASP Gibbs/Frequency Calculation Setup"
 echo "============================================"
 echo ""
 
+# Locate center-of-mass.py: this script's directory first, then PATH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/center-of-mass.py" ]; then
+    COM_SCRIPT="$SCRIPT_DIR/center-of-mass.py"
+else
+    COM_SCRIPT=$(command -v center-of-mass.py 2>/dev/null)
+fi
+
 # Ask for calculation type
 echo "Please select calculation type:"
 echo "  1) IDM frequency calculation (Improved Dimer Method - NWRITE=3)"
@@ -110,7 +118,11 @@ fi
 if [ "$use_dipole" = true ]; then
     # Run center-of-mass.py to get center of mass coordinates
     echo "Running center-of-mass.py to calculate center of mass..."
-    output=$(center-of-mass.py POSCAR)
+    if [ -z "$COM_SCRIPT" ]; then
+        echo "Error: center-of-mass.py not found (script directory or PATH)"
+        exit 1
+    fi
+    output=$(python3 "$COM_SCRIPT" POSCAR)
     echo "$output"
 
     # Extract content within [] as dipol variable
@@ -224,9 +236,9 @@ if [ -f "vasp_runscript" ]; then
     sed -i 's/VASP_EXE="vasp_std"/VASP_EXE="vasp_gam"/' vasp_runscript
     echo "Changed VASP_EXE to vasp_gam"
     
-    # Modify SBATCH ntasks to 128
-    sed -i 's/^#SBATCH --ntasks=[0-9]*/#SBATCH --ntasks=128/' vasp_runscript
-    echo "Changed #SBATCH --ntasks to 128"
+    # Modify SBATCH ntasks (--ntasks-per-node in vasp_runscript_setonix, or --ntasks) to 128
+    sed -i 's/^#SBATCH --ntasks\(-per-node\)\?=[0-9]*/#SBATCH --ntasks\1=128/' vasp_runscript
+    echo "Changed #SBATCH --ntasks(-per-node) to 128"
     
     # Modify SBATCH nodes to 1
     sed -i 's/^#SBATCH --nodes=[0-9]*/#SBATCH --nodes=1/' vasp_runscript
@@ -268,7 +280,7 @@ fi
 echo ""
 echo "=== Key Settings in vasp_runscript ==="
 grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "VASP_EXE setting not found"
-grep "#SBATCH --ntasks=" vasp_runscript 2>/dev/null || echo "ntasks setting not found"
+grep -E "#SBATCH --ntasks(-per-node)?=" vasp_runscript 2>/dev/null || echo "ntasks setting not found"
 grep "#SBATCH --nodes=" vasp_runscript 2>/dev/null || echo "nodes setting not found"
 echo ""
 echo "============================================"

@@ -69,13 +69,14 @@ for i in "${@:2}"; do
 		fi
 		if [ $num_count -eq 1 ]; then
 			band_index=$(echo "${num_array[0]}")
-			EINTMAX=$(awk -v var="$band_index" -v col="$column_num" '$1 == var {print $col; exit}' EIGENVAL)
+			EINTMAX=$(awk -v var="$band_index" -v col="$column_num" 'NR > 7 && $1 == var {print $col; exit}' EIGENVAL)
 			EINTMIN=$EINTMAX
 		else
 			band_index=$(echo "${num_array[@]}")
 			range=$(seq $band_index)
-			for i in $range; do
-			    val=$(awk -v num=$i -v col=$column_num '$1 == num {print $col}' EIGENVAL)
+			for b in $range; do
+			    # first k-point only (same as the single-band case); skip the 7 header lines
+			    val=$(awk -v num=$b -v col=$column_num 'NR > 7 && $1 == num {print $col; exit}' EIGENVAL)
 			    if [[ ! -z $val ]]; then
 			        if [[ -z $EINTMIN ]]; then
 			            EINTMIN=$val
@@ -110,6 +111,17 @@ for i in "${@:2}"; do
 
 done
 
+# Pick the submit command from the runscript header (PBS or Slurm)
+if grep -q "^#SBATCH" "$1"; then
+	SUB_CMD="sbatch"
+elif grep -q "^#PBS" "$1"; then
+	SUB_CMD=$(command -v qsub || echo /opt/pbs/default/bin/qsub)
+elif command -v sbatch >/dev/null 2>&1; then
+	SUB_CMD="sbatch"
+else
+	SUB_CMD="qsub"
+fi
+
 echo -e "Do you want to submit the jobs?\n1 YES\n2 NO"
 read SUBMIT_CHOICE
 if [ $SUBMIT_CHOICE -eq '1' ] ; then
@@ -117,8 +129,8 @@ if [ $SUBMIT_CHOICE -eq '1' ] ; then
 		folder="STM_${i}"
                 cd $folder
                 echo -e "\n========================================\nSubmission in process, please wait...\n..."
-                echo "qsub $1"
-                /opt/pbs/default/bin/qsub $1 && echo -e "\nJob submitted!\n========================================"
+                echo "$SUB_CMD $1"
+                $SUB_CMD $1 && echo -e "\nJob submitted!\n========================================"
                 cd ..
         done
 else

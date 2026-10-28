@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Prompt the user to input rotated atom index
 read -p "Enter rotation_atom: " rotation_atom

@@ -4,9 +4,31 @@ REMOVE_RENAME_FILES="CHG REPORT" # vaspout.h5
 COPY_RENAME_FILES="CONTCAR OSZICAR OUTCAR XDATCAR EIGENVAL" 
 BACKUP_INPUT_FILES="INCAR POSCAR"
 
+# Directory of this file (it is sourced from job scripts, so $0 is not this file)
+VASP_JOB_PARAMETERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd)"
+
+# find_tool <old hardcoded path>: that path if it exists, else the copy next to
+# this file, else the same name on PATH; prints nothing if not found
+find_tool () {
+    local name=$(basename "$1")
+    if [ -f "$1" ] ; then
+        echo "$1"
+    elif [ -f "$VASP_JOB_PARAMETERS_DIR/$name" ] ; then
+        echo "$VASP_JOB_PARAMETERS_DIR/$name"
+    else
+        command -v "$name" 2>/dev/null
+    fi
+}
+
 bader_cal (){
-    /software/projects/pawsey0328/hma/scripts/vtstscripts-1035/chgsum.pl  AECCAR0 AECCAR2
-    /software/projects/pawsey0328/hma/scripts/vasp-scripts/bader CHGCAR -ref CHGCAR_sum 
+    local chgsum=$(find_tool /software/projects/pawsey0328/hma/scripts/vtstscripts-1035/chgsum.pl)
+    local bader=$(find_tool /software/projects/pawsey0328/hma/scripts/vasp-scripts/bader)
+    if [ -z "$chgsum" ] || [ -z "$bader" ] ; then
+        echo "chgsum.pl or bader not found, Bader analysis skipped"
+        return
+    fi
+    "$chgsum"  AECCAR0 AECCAR2
+    "$bader" CHGCAR -ref CHGCAR_sum 
     rm -rf ${SLURM_SUBMIT_DIR}/AECCAR* ${SLURM_SUBMIT_DIR}/CHGCAR_sum
 }
 

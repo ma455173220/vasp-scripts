@@ -4,11 +4,32 @@ REMOVE_RENAME_FILES="CHG REPORT" # vaspout.h5
 COPY_RENAME_FILES="CONTCAR OSZICAR OUTCAR XDATCAR EIGENVAL" 
 BACKUP_INPUT_FILES="INCAR POSCAR"
 
+# Directory of this file (it is sourced from job scripts, so $0 is not this file)
+VASP_JOB_PARAMETERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd)"
+
+# find_tool <old hardcoded path>: that path if it exists, else the copy next to
+# this file, else the same name on PATH; prints nothing if not found
+find_tool () {
+	local name=$(basename "$1")
+	if [ -f "$1" ] ; then
+		echo "$1"
+	elif [ -f "$VASP_JOB_PARAMETERS_DIR/$name" ] ; then
+		echo "$VASP_JOB_PARAMETERS_DIR/$name"
+	else
+		command -v "$name" 2>/dev/null
+	fi
+}
+
 job_auto_submission () {
 	FUNCTION_CHOSEN=`grep "\.T\." VASP_AUTO_SUBMISSION |  awk -F '=|#' '{print $2}'`
 		FUNCTION_CHOSEN_NO_SPACE=`echo $FUNCTION_CHOSEN`
 	if [ "$FUNCTION_CHOSEN" ] ; then
-		sh /home/561/hm1876/vasp_scripts_self_created/${FUNCTION_CHOSEN_NO_SPACE}.sh 1> /dev/null
+		local auto_script=$(find_tool /home/561/hm1876/vasp_scripts_self_created/${FUNCTION_CHOSEN_NO_SPACE}.sh)
+		if [ -n "$auto_script" ] ; then
+			sh "$auto_script" 1> /dev/null
+		else
+			echo "${FUNCTION_CHOSEN_NO_SPACE}.sh not found, vasp_auto_submission skipped"
+		fi
 		sed -i 's/\.T\./\.F\./' VASP_AUTO_SUBMISSION
 	else
 		echo "No vasp_auto_submission chosen"
@@ -17,8 +38,14 @@ job_auto_submission () {
 
 bader_cal (){
 
-	/home/561/hm1876/vtstscripts/chgsum.pl  AECCAR0 AECCAR2
-	/home/561/hm1876/.local/bin/bader CHGCAR -ref CHGCAR_sum 
+	local chgsum=$(find_tool /home/561/hm1876/vtstscripts/chgsum.pl)
+	local bader=$(find_tool /home/561/hm1876/.local/bin/bader)
+	if [ -z "$chgsum" ] || [ -z "$bader" ] ; then
+		echo "chgsum.pl or bader not found, Bader analysis skipped"
+		return
+	fi
+	"$chgsum"  AECCAR0 AECCAR2
+	"$bader" CHGCAR -ref CHGCAR_sum 
 	rm -rf $PBS_O_WORKDIR/AECCAR* $PBS_O_WORKDIR/CHGCAR_sum
 }
 
@@ -73,7 +100,10 @@ print_band_gap (){
 	#echo 211 | vaspkit 
 	#v1.2.2
 	echo -e "211\n" | vaspkit
-	python3 /home/561/hm1876/.local/bin/band_vaspkit.py
+	local band_py=$(find_tool /home/561/hm1876/.local/bin/band_vaspkit.py)
+	if [ -n "$band_py" ] ; then
+		python3 "$band_py"
+	fi
 }
 
 print_dos (){
@@ -107,9 +137,30 @@ AUTO_STOP (){
 	rm AUTOSTOP
 }
 
+get_incar_tag() {
+	local key="$1"
+	awk -v key="$key" '
+		{
+			line=$0
+			sub(/[#!].*/, "", line)
+			n=split(line, parts, ";")
+			for (i=1; i<=n; i++) {
+				part=parts[i]
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", part)
+				if (part ~ "^" key "[[:space:]]*=") {
+					sub("^[^=]*=[[:space:]]*", "", part)
+					split(part, value, /[[:space:]]+/)
+					print value[1]
+					exit
+				}
+			}
+		}
+	' INCAR
+}
+
 check_completion() {
 	local outcar_file="$PWD/OUTCAR"
-	local mode_check=`grep -v "^#" INCAR | grep "IBRION" | sed 's/.*IBRION[[:space:]]*=[[:space:]]*\([0-9-][0-9]*\).*/\1/' | tail -1`
+	local mode_check="$(get_incar_tag IBRION || true)"
 
 	if [[ ! -f "$outcar_file" ]]; then
 		echo "$(date): Job failed - OUTCAR not found in $PWD" >> ~/vasp_fail_log
@@ -121,7 +172,13 @@ check_completion() {
 		return 1
 	fi
 
-	if [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
+	if [[ "$mode_check" =~ ^(0|5|6|7|8)$ ]]; then
+		# MD (IBRION=0) or finite-difference/DFPT (IBRION=5-8): no ionic convergence message
+		if ! grep -q "EDIFF is reached" "$outcar_file"; then
+			echo "$(date): Job failed - IBRION=$mode_check did not meet criteria in $PWD" >> ~/vasp_fail_log
+			return 1
+		fi
+	elif [[ -z "$mode_check" ]] || [[ "$mode_check" != "-1" ]]; then
 		# Optimization job
 		if ! grep -q "reached required accuracy" "$outcar_file" || ! grep -q "EDIFF is reached" "$outcar_file"; then
 			echo "$(date): Job failed - Optimization did not converge in $PWD" >> ~/vasp_fail_log
@@ -140,10 +197,7 @@ check_completion() {
 
 
 final_act (){
-	MODE_CHECK=`grep -v "^#" INCAR | grep "IBRION" | sed 's/.*IBRION[[:space:]]*=[[:space:]]*\([0-9-][0-9]*\).*/\1/' | tail -1`
-	if [ $MODE_CHECK -ne -1 ] ; then
-		rename_files
-	fi
+	# Back up outputs once for every job type (previously ran twice for relaxations)
 	rename_files
 	remove_files
 	if check_completion; then

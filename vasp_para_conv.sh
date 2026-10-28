@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# vasp_param_test.sh
+# vasp_para_conv.sh
 # 用途：对 VASP INCAR 中的指定参数生成多组测试文件夹，并可选择性提交任务
 #
 # 用法：
-#   bash vasp_param_test.sh -p PARAM -v "none val1 val2 ..." [-f "file1 file2 ..."] [-i INCAR] [-j JOBSCRIPT]
+#   bash vasp_para_conv.sh -p PARAM -v "none val1 val2 ..." [-f "file1 file2 ..."] [-i INCAR] [-j JOBSCRIPT]
 #
 # 参数：
 #   -p  （必填）要测试的 INCAR 参数名，如 NUPDOWN
@@ -15,9 +15,9 @@
 #   -h  显示此帮助
 #
 # 示例：
-#   bash vasp_param_test.sh -p NUPDOWN -v "none 1 3"
-#   bash vasp_param_test.sh -p NUPDOWN -v "none 1 3" -f "POSCAR POTCAR KPOINTS job.sh" -j job.sh
-#   bash vasp_param_test.sh -p ENCUT   -v "400 520 600" -f "POSCAR POTCAR KPOINTS" -j job.sh
+#   bash vasp_para_conv.sh -p NUPDOWN -v "none 1 3"
+#   bash vasp_para_conv.sh -p NUPDOWN -v "none 1 3" -f "POSCAR POTCAR KPOINTS job.sh" -j job.sh
+#   bash vasp_para_conv.sh -p ENCUT   -v "400 520 600" -f "POSCAR POTCAR KPOINTS" -j job.sh
 # =============================================================================
 
 set -euo pipefail

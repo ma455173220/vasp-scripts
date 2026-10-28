@@ -1,6 +1,6 @@
 #!/bin/bash
 ############################################################
-# Script Name: nupdown_summary_submit.sh
+# Script Name: vasp_nupdown_test.sh
 #
 # Description:
 #   Automates NUPDOWN setup/submission & Postprocess summary
@@ -10,7 +10,7 @@
 #   2. Parent folder contains defect subfolders (e.g. v_O-option1...)
 #   3. Set DEFECT_PATH to match subfolder names (e.g. DEFECT_PATH="v_O*")
 #   4. Run:
-#         bash nupdown_summary_submit.sh
+#         bash vasp_nupdown_test.sh
 #
 # Functions:
 #   [1] NUPDOWN Test:
@@ -104,7 +104,7 @@ if [[ "$choice" == "1" ]]; then
 
         if [[ "$perform_submit" == "y" ]]; then
             for submit_dir in "$dir_nupdown" "$dir_nupdown_plus2" "$dir_no_nupdown"; do
-                cd "$submit_dir" && $SUBMISSION_CMD "$SUBMISSION_SCRIPT" && cd ..
+                (cd "$submit_dir" && $SUBMISSION_CMD "$SUBMISSION_SCRIPT")
             done
         fi
         cd "$root_dir"

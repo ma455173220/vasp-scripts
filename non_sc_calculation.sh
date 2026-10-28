@@ -157,7 +157,8 @@ read_kpoints() {
 
 file_editor() {
     local incar="$NEW_DIRECTORY/INCAR"
-    local sub_script="$SUBMISSION_SCRIPT"  # absolute path — safe after cd
+    # Patch the copy in NEW_DIRECTORY, not the original next to the SCF run
+    local sub_script="$NEW_DIRECTORY/$(basename "$SUBMISSION_SCRIPT")"
 
     # ── INCAR modifications ──
     # Set NSW=0 and IBRION=-1 for non-SCF (static) run

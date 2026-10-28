@@ -41,16 +41,17 @@ generate_supercells() {
 convert_cif_to_vasp() {
     read -p "Enter folder containing CIF files (default: geo): " cif_dir
     cif_dir=${cif_dir:-geo}
-    cd $cif_dir
+    cd "$cif_dir" || { echo "❌ Cannot enter folder: $cif_dir"; return 1; }
 
     echo ">>> Converting CIF to VASP format..."
     for cif in *.cif; do
+        [ -e "$cif" ] || continue
         base=${cif%.cif}
         echo -e "1\n175\n113 $cif\n" | atomkit > /dev/null
         rm $cif
         echo "Converted $cif -> ${base}.vasp"
     done
-    cd ..
+    cd - > /dev/null
     echo "✅ Conversion completed."
 }
 

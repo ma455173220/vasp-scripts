@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
+fatband_analysis.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
 
 用途：对任意体系，按 元素 × 轨道壳层(s/p/d[/f]) 批量生成 fatband 图，
       用于 Wannier 投影集的选取（对照能量窗口内哪些成分权重大）。
@@ -16,7 +16,7 @@ fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
    PROCAR / OUTCAR / POSCAR / KPOINTS 四个文件。
 
 2. 运行（无需任何改动，原子索引和 E_F 全自动）：
-       python fatband_batch.py -d /path/to/band_dir
+       python fatband_analysis.py -d /path/to/band_dir
 
 3. 看图：所有 fatband_<元素>_<壳层>.png 用同一色标 (0-0.5)，
    直接比较颜色深浅 => 费米面附近哪些面板颜色深，
@@ -39,10 +39,10 @@ fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
   -o, --outdir DIR      图片输出目录（默认当前目录）
 
 常用组合示例：
-  python fatband_batch.py                              # 全默认
-  python fatband_batch.py -e -6 6                      # 聚焦费米面
-  python fatband_batch.py --species Ba Cu --shells s d # BaCu 关键壳层
-  python fatband_batch.py -d band/ -o figs/ --cmap viridis
+  python fatband_analysis.py                              # 全默认
+  python fatband_analysis.py -e -6 6                      # 聚焦费米面
+  python fatband_analysis.py --species Ba Cu --shells s d # BaCu 关键壳层
+  python fatband_analysis.py -d band/ -o figs/ --cmap viridis
 
 ════════════════════════════════════════════════════════════════════
 三、想改脚本时改哪儿（按场景）

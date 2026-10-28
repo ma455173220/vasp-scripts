@@ -32,7 +32,7 @@ def get_number_of_atoms(where):
 
 try:
     outcar = open(args[0], 'r')
-except IndexError:
+except (IndexError, OSError):
     sys.stderr.write(FAIL)
     sys.stderr.write('There was a problem opening the OUTCAR file. Does it exist at all?'
                      )
@@ -72,8 +72,8 @@ if outcar != None:
 
     try:
         poscar = open("POSCAR", 'r')
-    except IndexError:
-        pass
+    except OSError:
+        poscar = None
 
     if poscar != None:
         check_poscar = subprocess.getoutput('grep -in "Selective dynamics" POSCAR')
@@ -82,7 +82,7 @@ if outcar != None:
             pos = poscar.readlines()
             for i, value in enumerate(pos):
                 if i >= line_number_selective_dynamics + 1 and i < line_number_selective_dynamics + 1 + natoms:
-                    if value.split()[3] and value.split()[4] and  value.split()[5] == "F":
+                    if value.split()[3] == "F" and value.split()[4] == "F" and value.split()[5] == "F":
                         atom_index = int(i - line_number_selective_dynamics)
                         atoms_freeze.append(atom_index)
                     else:
@@ -91,7 +91,7 @@ if outcar != None:
 
     i = 0
     for line in outcarlines:
-        if "NELM" and "NELMIN" and "NELMDL" in line:
+        if "NELM" in line and "NELMIN" in line and "NELMDL" in line:
             nelmax = line.split()[2].strip(';')
 
         if "NIONS" in line:

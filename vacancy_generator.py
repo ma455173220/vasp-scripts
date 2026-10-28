@@ -338,14 +338,14 @@ def interactive_setup():
 
 def generate_potcar(workdir):
     """
-    在 workdir 内运行 `echo -e "103\n" | vaspkit` 生成 POTCAR。
+    在 workdir 内运行 vaspkit（输入 "103"）生成 POTCAR。
     vaspkit 会读取当前目录的 POSCAR 自动判断元素顺序，因此必须在
     POSCAR 已写出之后、进入该目录再调用。
     """
-    cmd = 'echo -e "103\n" | vaspkit'
+    # 直接把 "103" 写入 vaspkit 的 stdin（不经过 /bin/sh，避免 echo -e 的兼容问题）
     try:
         result = subprocess.run(
-            cmd, shell=True, cwd=str(workdir),
+            ["vaspkit"], input="103\n", cwd=str(workdir),
             capture_output=True, text=True, timeout=60
         )
         potcar_path = Path(workdir) / "POTCAR"
@@ -479,7 +479,7 @@ def main():
         print(f"[错误] 读取结构失败：{e}", file=sys.stderr)
         sys.exit(1)
 
-    mode_str = f"O→{sub_element} 置换" if sub_element else "O 空穴"
+    mode_str = f"{args.element}→{sub_element} 置换" if sub_element else f"{args.element} 空穴"
     print(f"\n读取结构：{args.file}  ({len(atoms)} 原子)")
     print(f"缺陷模式：{mode_str}  ×{args.nvac}\n")
 

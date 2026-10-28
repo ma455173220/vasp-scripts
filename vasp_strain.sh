@@ -36,6 +36,22 @@ then
 	exit 1
 fi
 
+# Locate deform_strain.sh: old install path, else this script's directory, else PATH
+deform_strain="/home/561/hm1876/.local/bin/deform_strain.sh"
+if [ ! -f "$deform_strain" ]; then
+	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	if [ -f "$script_dir/deform_strain.sh" ]; then
+		deform_strain="$script_dir/deform_strain.sh"
+	else
+		deform_strain=$(command -v deform_strain.sh)
+	fi
+fi
+if [ -z "$deform_strain" ]
+then
+	echo -e "${ORANGE}Error: deform_strain.sh not found (install path, script directory or PATH)"
+	exit 1
+fi
+
 # Choose the shear strain direction
 read -p "Please select the strain direction (XX, YY, ZZ, XY, XZ, YZ): " shear_strain_direction
 
@@ -55,7 +71,7 @@ do
 	# Run deform_strain
 	echo -e "${GREEN}Running deform_strain for strain $arg..."
 	new_arg=$(echo "$arg - 1" | bc)
-	/home/561/hm1876/.local/bin/deform_strain.sh $shear_strain_direction $new_arg
+	bash "$deform_strain" $shear_strain_direction $new_arg
 	echo -e "${ORANGE}.............................................................................."
 
 	cd ..

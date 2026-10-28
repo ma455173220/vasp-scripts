@@ -1,0 +1,77 @@
+# vasp-scripts
+
+VASP 计算辅助脚本（Gadi PBS 和 Setonix Slurm 都能用）。
+提交作业的脚本会按 runscript 头部（`#PBS` 或 `#SBATCH`）或系统里有哪个命令（`qsub` / `sbatch`）自动选择调度器。
+脚本之间互相调用时，先找本脚本所在目录，再找 `PATH`，最后才用旧的绝对路径。
+
+> Wannier90 / WannierTools 相关脚本（`wannier_*.py`、`wt-input-generator.sh` 等）已移到 `wannier90-script` 仓库，文件名不变。`qe2poscar.py` 在 `qe-script` 里。
+
+## 作业模板与作业结束钩子
+
+| 文件 | 用途 |
+|---|---|
+| `vasp_runscript_setonix` | Setonix Slurm 作业模板（VASP 6.4.3） |
+| `VASP_JOB_PARAMETERS_slurm` / `VASP_JOB_PARAMETERS_gadi` | 由 runscript `source`：作业结束时备份并重命名输出、判断是否收敛、写 `~/vasp_job_log`、Bader、带隙和 DOS |
+| `vasp_incar` | 带注释的 INCAR 总模板（band/dos/soc/stm 脚本会取消其中 `# KEY` 行的注释） |
+| `vasp_clean.sh` | 递归删除大文件（⚠️ WAVECAR/CHGCAR/`*_hr.dat`，不会确认） |
+| `jobtrack/` | 作业提交记录与 fzf 浏览工具（PBS/Slurm/本地），见 `jobtrack/README.md` |
+
+## 自动化工作流
+
+| 脚本 | 用途 |
+|---|---|
+| `vasp_workflow_input_generator_setonix.sh` | 生成 step0–5（gamma 预优化 → 优化 → 优化 → SCF → 能带 → DOS）的 INCAR、KPOINTS 和串行 workflow 脚本（Slurm） |
+| `vasp_workflow_input_generator_gadi.sh` | 同上，PBS 版 |
+| `vasp_para_conv.sh` | 通用 INCAR 参数扫描：生成目录并提交（`-h` 查看帮助） |
+| `vasp_nupdown_test.sh` | 缺陷 NUPDOWN 测试：提交后汇总，找出能量最低的态 |
+| `scan_vasp_energies.py` | 按能量给子目录排序 → `vasp_energy_scan.log` |
+| `grad.py` | OUTCAR 弛豫监控（能量、SCF 次数、受力） |
+| `sigma.sh` | 检查 T·S/原子 < 1 meV |
+
+## 后续计算的搭建（在已收敛的目录里运行）
+
+| 脚本 | 用途 |
+|---|---|
+| `non_sc_calculation.sh` | 由弛豫结果搭一个 SCF 静态计算目录（`NON-SC-kmesh-0.03/`），自动选 vasp_gam/std |
+| `band_structure_calculation.sh` | 能带（ICHARG=11，vaspkit 303 生成 KPATH） |
+| `dos_calculation.sh` | DOS（`-e EMIN EMAX`） |
+| `soc_calculation.sh` | SOC（vasp_ncl、NBANDS×2） |
+| `stm-calculations.sh` / `plot-stm.sh` | STM 部分电荷：搭建 / vaspkit 作图 |
+| `gibbs.sh` → `get_idm.py` | 频率计算（IBRION=5）→ 由频率结果生成 IDM 输入（IBRION=44） |
+| `chgcent.py` | 电荷中心与偶极（CHGCAR + OUTCAR） |
+| `center-of-mass.py` | POSCAR 质心（分数坐标），workflow/gibbs 用它设置 DIPOL |
+| `fatband_analysis.py` | pyprocar 按元素、壳层批量画 fatband（用于选 Wannier 投影） |
+
+## 结构生成与检查
+
+| 脚本 | 用途 |
+|---|---|
+| `vasp_strain_gen.sh` | 正应变系列（正交 / 六方晶胞），可以自动接上 workflow（Setonix） |
+| `vasp_strain.sh` + `deform_strain.sh` + `vasp_strain_analysis.sh` | 任意应变分量（含剪切）→ 提交 → EFG 汇总 |
+| `make_mag_supercell.py` | 带 MAGMOM 的超胞 |
+| `gen_amorphous.py` | 非晶 AIMD 初始结构（随机空位 + 扰动） |
+| `vacancy_generator.py` | 用 spglib 枚举不等价的空位 / 替位组合 |
+| `superfrac_slurm.sh` + `supercell` | 无序结构枚举 → 计算 → 能量汇总 |
+| `crystal_rotator.sh` | atomkit 旋转结构 |
+| `atomic_distance_checker.py` | 检查原子间距是否过近（PBC，支持 Selective dynamics） |
+| `xyz2pos.py` | xyz → POSCAR |
+
+## 缺陷
+
+| 脚本 | 用途 |
+|---|---|
+| `doped_workflow.sh` | ShakeNBreak 各步骤的命令提示（`REMOTE_MACHINE`/`REMOTE_PATH` 可用环境变量覆盖） |
+| `doped_extract_poscars.sh` | 收集 doped 结构 |
+| `sxdefectalign2d_workflow.sh` + `sxdefectalign2d_iterative.py` + `sxdefectalign2d_system.sx` | 2D 带电缺陷修正（参考 LOCPOT 用 `--vref` 或 `VREF_LOCPOT` 指定） |
+
+## 二进制
+
+| 文件 | 来源 |
+|---|---|
+| `bader` | Henkelman Bader v1.05（静态链接） |
+| `supercell` | Okhotnikov supercell |
+| `vasp-xdat-analyzer` | 由 `vasp-xdat-analyzer.f90` 编译：`gfortran -O2 -o vasp-xdat-analyzer vasp-xdat-analyzer.f90` |
+
+## 外部依赖
+
+vaspkit / atomkit、VTST `chgsum.pl`、python3（numpy/ASE/spglib/pyprocar）、sxdefectalign2d、ShakeNBreak。

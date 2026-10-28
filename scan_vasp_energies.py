@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-vasp_echeck.py  —  VASP Energy Checker
+scan_vasp_energies.py  —  VASP Energy Checker
 =======================================
 用途
 ----
 扫描当前目录下所有一级子文件夹中的 VASP 计算，
   1. 检测任务是否成功收敛（读 OUTCAR）
   2. 提取最终能量 E0（读 OSZICAR）
-  3. 按总能量排序，输出人类可读的 .log 和机器可读的 .csv
+  3. 按总能量排序，输出人类可读的 .log（vasp_energy_scan.log）
 
 使用方式
 --------
   1. 将本脚本放在「包含各结构子文件夹的父目录」下，例如：
 
        relaxation/
-       ├── vasp_echeck.py      ← 脚本放这里
+       ├── scan_vasp_energies.py      ← 脚本放这里
        ├── struct_A/
        │   ├── INCAR
        │   ├── OUTCAR
@@ -25,7 +25,7 @@ vasp_echeck.py  —  VASP Energy Checker
 
   2. 进入该父目录后运行：
 
-       python3 vasp_echeck.py
+       python3 scan_vasp_energies.py
 
   3. 脚本会在当前目录生成：
        vasp_energy_scan.log   —— 对齐格式，终端友好，便于快速浏览

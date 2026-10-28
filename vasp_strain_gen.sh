@@ -74,85 +74,28 @@ apply_uniform_strain() {
     sed -i "2s/.*/ ${new_factor}/" "$output_file"
 }
 
-# Function to apply strain to orthogonal lattice (90°)
-apply_orthogonal_strain() {
+# Function to apply a directional (Cartesian) strain
+# Scales the Cartesian x/y/z components of ALL three lattice vectors
+# (POSCAR lines 3-5) by (1 + strain) for each direction in X/Y/Z.
+# This is a proper uniaxial/biaxial strain for any lattice (orthogonal,
+# 120° hexagonal, monoclinic, ...); combined directions (XY, XZ, YZ) apply
+# all listed components. Direct (fractional) atomic coordinates follow the cell.
+apply_cartesian_strain() {
     local input_file="$1"
     local output_file="$2"
     local strain_directions="$3"
     local strain_value="$4"
     
-    # Copy original file
-    cp "$input_file" "$output_file"
-    
-    # Calculate strain factor
+    # Calculate strain factor per Cartesian direction
     local strain_factor=$(echo "1 + $strain_value" | bc -l)
+    local fx=1 fy=1 fz=1
+    [[ "$strain_directions" == *"X"* ]] && fx=$strain_factor
+    [[ "$strain_directions" == *"Y"* ]] && fy=$strain_factor
+    [[ "$strain_directions" == *"Z"* ]] && fz=$strain_factor
     
-    # Apply strain to specific directions
-    if [[ "$strain_directions" == *"X"* ]]; then
-        # Modify a-axis (line 3, first component)
-        local ax=$(sed -n '3p' "$output_file" | awk '{print $1}')
-        local new_ax=$(echo "$ax * $strain_factor" | bc -l)
-        sed -i "3s/^\s*[0-9.-]*/ ${new_ax}/" "$output_file"
-    fi
-    
-    if [[ "$strain_directions" == *"Y"* ]]; then
-        # Modify b-axis (line 4, second component)
-        local by=$(sed -n '4p' "$output_file" | awk '{print $2}')
-        local new_by=$(echo "$by * $strain_factor" | bc -l)
-        sed -i "4s/\(\s*[0-9.-]*\s*\)[0-9.-]*/\1${new_by}/" "$output_file"
-    fi
-    
-    if [[ "$strain_directions" == *"Z"* ]]; then
-        # Modify c-axis (line 5, third component)
-        local cz=$(sed -n '5p' "$output_file" | awk '{print $3}')
-        local new_cz=$(echo "$cz * $strain_factor" | bc -l)
-        sed -i "5s/\(\s*[0-9.-]*\s*[0-9.-]*\s*\)[0-9.-]*/\1${new_cz}/" "$output_file"
-    fi
-}
-
-# Function to apply strain to hexagonal lattice (120°)
-apply_hexagonal_strain() {
-    local input_file="$1"
-    local output_file="$2"
-    local strain_directions="$3"
-    local strain_value="$4"
-    
-    # Copy original file
-    cp "$input_file" "$output_file"
-    
-    # Calculate strain factor
-    local strain_factor=$(echo "1 + $strain_value" | bc -l)
-    
-    # For hexagonal lattice with 120° angle:
-    # a = (a, 0, 0)
-    # b = (-a/2, a*sqrt(3)/2, 0)
-    # c = (0, 0, c)
-    
-    if [[ "$strain_directions" == *"X"* ]] || [[ "$strain_directions" == *"Y"* ]]; then
-        # For X or Y strain in hexagonal, both a and b vectors need to be modified
-        # to maintain the 120° angle
-        
-        # Get current values
-        local ax=$(sed -n '3p' "$output_file" | awk '{print $1}')
-        local bx=$(sed -n '4p' "$output_file" | awk '{print $1}')
-        local by=$(sed -n '4p' "$output_file" | awk '{print $2}')
-        
-        # Apply strain to both vectors
-        local new_ax=$(echo "$ax * $strain_factor" | bc -l)
-        local new_bx=$(echo "$bx * $strain_factor" | bc -l)
-        local new_by=$(echo "$by * $strain_factor" | bc -l)
-        
-        # Update POSCAR
-        sed -i "3s/^\s*[0-9.-]*/ ${new_ax}/" "$output_file"
-        sed -i "4s/^\s*[0-9.-]*/ ${new_bx}/" "$output_file"
-        sed -i "4s/\(\s*[0-9.-]*\s*\)[0-9.-]*/\1${new_by}/" "$output_file"
-        
-    elif [[ "$strain_directions" == *"Z"* ]]; then
-        # Z strain only affects c-axis
-        local cz=$(sed -n '5p' "$output_file" | awk '{print $3}')
-        local new_cz=$(echo "$cz * $strain_factor" | bc -l)
-        sed -i "5s/\(\s*[0-9.-]*\s*[0-9.-]*\s*\)[0-9.-]*/\1${new_cz}/" "$output_file"
-    fi
+    awk -v fx="$fx" -v fy="$fy" -v fz="$fz" '
+        NR>=3 && NR<=5 { printf "  %20.12f%20.12f%20.12f\n", $1*fx, $2*fy, $3*fz; next }
+        { print }' "$input_file" > "$output_file"
 }
 
 # Function to apply directional strain
@@ -163,11 +106,13 @@ apply_directional_strain() {
     local strain_value="$4"
     local lattice_type="$5"
     
-    if [ "$lattice_type" = "orthogonal_90" ]; then
-        apply_orthogonal_strain "$input_file" "$output_file" "$strain_directions" "$strain_value"
-    else
-        apply_hexagonal_strain "$input_file" "$output_file" "$strain_directions" "$strain_value"
+    # 120° hexagonal: X or Y strain is applied to the whole hexagonal plane (a and b
+    # scaled together, keeping the 120° angle), as in the original script; Z is
+    # applied in addition when requested (XZ / YZ previously dropped the Z part)
+    if [ "$lattice_type" != "orthogonal_90" ] && [[ "$strain_directions" == *[XY]* ]]; then
+        strain_directions="XY${strain_directions//[XY]/}"
     fi
+    apply_cartesian_strain "$input_file" "$output_file" "$strain_directions" "$strain_value"
 }
 
 # Function to copy VASP input files
@@ -233,10 +178,14 @@ run_workflow_generator() {
     local workflow_prefix="${user_prefix}_${strain_name}"
     
     # Run the workflow generator with automatic inputs
+    # (reproduces the old "y = gamma-only pre-opt" answer: generate/run steps
+    #  0 1 2 with job numbers from 00, dipole correction off)
     {
         echo "$workflow_prefix"  # Enter prefix
-        echo "y"                 # Choose gamma-only pre-optimization
-    } | sh ./vasp_workflow_input_generator_setonix.sh > workflow_generator.log 2>&1
+        echo "0"                 # Job number offset
+        echo "0 1 2"             # Steps: gamma-only pre-opt, step1, step2
+        echo "n"                 # No dipole correction
+    } | bash ./vasp_workflow_input_generator_setonix.sh > workflow_generator.log 2>&1
     
     # Check if workflow script was generated
     local workflow_script="${workflow_prefix}.sh"
@@ -559,7 +508,7 @@ if [ "$auto_workflow" = true ]; then
     echo "  3. All calculations are running in background"
 else
     echo "  1. Enter each folder: cd strain_*/"
-    echo "  2. Run workflow generator: sh ./vasp_workflow_input_generator_setonix.sh"
+    echo "  2. Run workflow generator: bash ./vasp_workflow_input_generator_setonix.sh"
     echo "  3. Start calculation: nohup ./${workflow_prefix}_*.sh &"
 fi
 echo "  4. Use 'ls strain_*/' to check all generated folders"

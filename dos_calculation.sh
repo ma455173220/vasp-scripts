@@ -13,7 +13,8 @@ EOL
     exit 1
 }
 
-SUBMISSION_SCRIPT=$(grep -l "#PBS -P ad73" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
+SUBMISSION_SCRIPT=$(grep -l -E "^#(PBS|SBATCH)" --exclude=CHGCAR --exclude=WAVECAR --exclude=vasprun.xml --exclude=PROCAR --exclude=POTCAR --exclude=DOSCAR --exclude=OUTCAR * -d skip)
+[ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found in $PWD"
 COPY_FILES_NEEDED="INCAR POSCAR POTCAR $SUBMISSION_SCRIPT"
 LN_FILES_NEEDED="CHGCAR"
 NEW_DIRECTORY="DOS"

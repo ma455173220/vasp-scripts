@@ -56,8 +56,14 @@ check_command "vaspkit" "VASP toolkit for generating KPOINTS"
 echo ""
 echo "Checking Python scripts (if exist)..."
 # Common Python scripts that might be used
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-check_command "center-of-mass.py" "Center of mass calculation for dipole correction"
+# center-of-mass.py: this script's directory first, then PATH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/center-of-mass.py" ]; then
+    COM_SCRIPT="$SCRIPT_DIR/center-of-mass.py"
+else
+    COM_SCRIPT=$(command -v center-of-mass.py 2>/dev/null)
+fi
+check_script "${COM_SCRIPT:-center-of-mass.py}" "Center of mass calculation for dipole correction"
 
 echo ""
 echo "Checking base runscript template..."
@@ -275,6 +281,38 @@ else
     echo "ℹ️ Skipping gamma-only pre-optimization."
 fi
 
+echo ""
+echo ">>> DIPOLE CORRECTION"
+read -p "Enable dipole correction? [y/N]: " -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    USE_DIPOL_CORR=1
+    echo "✅ Dipole correction enabled."
+    missing_tags=()
+    for tag in LDIPOL IDIPOL DIPOL; do
+        if ! grep -qiE "^\s*${tag}\s*=" INCAR 2>/dev/null; then
+            missing_tags+=("$tag")
+        fi
+    done
+    if [[ ${#missing_tags[@]} -gt 0 ]]; then
+        echo "❌ INCAR is missing or has commented-out dipole tags:"
+        for t in "${missing_tags[@]}"; do
+            echo "   • $t"
+        done
+        echo "   Add/uncomment these tags in INCAR before running the generator."
+        exit 1
+    fi
+    echo "✅ INCAR contains LDIPOL, IDIPOL, and DIPOL."
+    if [ -z "$COM_SCRIPT" ]; then
+        echo "⚠️  center-of-mass.py not found (script dir or PATH) — dipole correction will fail at runtime."
+    else
+        echo "✅ center-of-mass.py found: $COM_SCRIPT"
+    fi
+else
+    USE_DIPOL_CORR=0
+    echo "ℹ️  Dipole correction disabled."
+fi
+
 # ===== Step 0 (Optional Gamma-only pre-optimization) =====
 if [ "$PERFORM_STEP0" = true ]; then
     separator "STEP 0: Generating INCAR_step0 (Gamma-only pre-optimization)"
@@ -432,16 +470,16 @@ RUN_STEPS=(0 1 2)
 EOL
 else
 cat >> "$WORKFLOW_SCRIPT" << EOL
-RUN_STEPS=(0 1 2)
+RUN_STEPS=(1 2)
 EOL
 fi
 
 cat >> "$WORKFLOW_SCRIPT" << EOL
 JOB_NAME="${PREFIX}_workflow"
 
-# Whether to apply dipole correction (true/false)
-# 1 = enable dipole correction, 0 = disable
-USE_DIPOL_CORR=1
+# Whether to apply dipole correction (1 = enable, 0 = disable)
+USE_DIPOL_CORR=${USE_DIPOL_CORR}
+COM_SCRIPT="${COM_SCRIPT}"  # center-of-mass.py (resolved by the generator; PATH used if missing)
 
 # ===== Submission script base name (customize here) =====
 RUNSCRIPT_BASE="$RUNSCRIPT_BASE"  # Change this prefix to customize submission script names
@@ -496,6 +534,27 @@ check_job_done() {
         fi
     done
 }
+
+##############################################
+# ===== FUNCTION: Set DIPOL from center of mass =====
+# Strips VASP 6.4 species suffixes (e.g. Ti_pv/abc123) from line 6 of
+# ./POSCAR, runs center-of-mass.py and writes DIPOL into ./INCAR
+##############################################
+set_dipol() {
+    local com_script="\$COM_SCRIPT"
+    [ -f "\$com_script" ] || com_script=\$(command -v center-of-mass.py 2>/dev/null)
+    if [ -z "\$com_script" ]; then
+        echo "❌ center-of-mass.py not found; cannot set DIPOL in \$(pwd)." >> "\$LOGFILE"
+        return 1
+    fi
+    sed -i '6s|[/_][^[:space:]]*||g' POSCAR
+    local com=\$(python3 "\$com_script" POSCAR | awk -F'[][]' '/Center of mass/{print \$2}')
+    if [ -z "\$com" ]; then
+        echo "❌ center-of-mass.py gave no result in \$(pwd); DIPOL not set." >> "\$LOGFILE"
+        return 1
+    fi
+    sed -i "s/^DIPOL *=.*/DIPOL = \$com/" INCAR
+}
 EOL
 
 if [ "$PERFORM_STEP0" = true ]; then
@@ -510,9 +569,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 0 " ]]; then
     cp KPOINTS_step0 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID0=$($SUB_CMD ${RUNSCRIPT_BASE}_step0 | tail -1)
     check_job_done 0 $JOBID0 "opt" "$ROOT_DIR"
@@ -545,9 +602,7 @@ fi
 cat >> "$WORKFLOW_SCRIPT" << 'EOL'
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID1=$($SUB_CMD ${RUNSCRIPT_BASE}_step1 | tail -1)
     check_job_done 1 $JOBID1 "opt" "$ROOT_DIR"
@@ -564,9 +619,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 2 " ]]; then
     cp KPOINTS_step2 KPOINTS
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID2=$($SUB_CMD ${RUNSCRIPT_BASE}_step2 | tail -1)
     check_job_done 2 $JOBID2 "opt" "$ROOT_DIR"
@@ -586,9 +639,7 @@ if [[ " ${RUN_STEPS[@]} " =~ " 3 " ]]; then
     cd "$SCF_DIR"
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID3=$($SUB_CMD ${RUNSCRIPT_BASE}_scf | tail -1)
     check_job_done 3 $JOBID3 "scf" "$SCF_DIR"
@@ -610,9 +661,7 @@ run_band() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_band" ${RUNSCRIPT_BASE}_band
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID4=$($SUB_CMD ${RUNSCRIPT_BASE}_band | tail -1)
     check_job_done 4 $JOBID4 "scf" "$BAND_DIR"
@@ -634,9 +683,7 @@ run_dos() {
     cp "$ROOT_DIR/${RUNSCRIPT_BASE}_dos" ${RUNSCRIPT_BASE}_dos
     # Define DIPOL for dipole correction from the structure's center of mass
     if [[ $USE_DIPOL_CORR -eq 1 ]]; then
-        sed -i 's|[/_][^[:space:]]*||g' POSCAR
-        com=$(center-of-mass.py POSCAR | awk -F'[][]' '/Center of mass/{print $2}')
-        sed -i "s/^DIPOL *=.*/DIPOL = $com/" INCAR
+        set_dipol || exit 1
     fi
     JOBID5=$($SUB_CMD ${RUNSCRIPT_BASE}_dos | tail -1)
     check_job_done 5 $JOBID5 "scf" "$DOS_DIR"
@@ -709,7 +756,7 @@ if [ "$PERFORM_STEP0" = true ]; then
     echo "   1. Edit $WORKFLOW_SCRIPT to select desired steps (RUN_STEPS array)"
     echo "   2. Run \"nohup ./$WORKFLOW_SCRIPT &\" to execute the workflow"
     echo ""
-    echo "   Default steps: Step0 (gamma-only) → Step1 → Step2 → SCF"
+    echo "   Default steps: Step0 (gamma-only) → Step1 → Step2"
     echo "   Full workflow: Step0 → Step1 → Step2 → SCF → Band & DOS"
 else
     echo "✅ All INCAR_xxx, KPOINTS_xxx, and ${RUNSCRIPT_BASE}_xxx generated successfully:"
@@ -725,7 +772,7 @@ else
     echo "   1. Edit $WORKFLOW_SCRIPT to select desired steps (RUN_STEPS array)"
     echo "   2. Run \"nohup ./$WORKFLOW_SCRIPT &\" to execute the workflow"
     echo ""
-    echo "   Default steps: Step1 → Step2 → SCF"
+    echo "   Default steps: Step1 → Step2"
     echo "   Full workflow: Step1 → Step2 → SCF → Band & DOS"
 fi
 echo ""
@@ -735,5 +782,4 @@ echo "     - vasp_gam for 1×1×1 k-mesh (gamma-only calculations)"
 echo "     - vasp_std for all other k-meshes"
 echo "   • For large systems, even with denser k-mesh settings, you might still get 1×1×1"
 echo "   • Always check the console output above to see which VASP executable was assigned"
-echo "   • The workflow script $WORKFLOW_SCRIPT includes automatic dipole correction"
-echo "   • Modify USE_DIPOL_CORR=1 in $WORKFLOW_SCRIPT if dipole correction is needed"
+echo "   • Dipole correction: USE_DIPOL_CORR=${USE_DIPOL_CORR} (set during this run)"
