@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# This script is used to create directories for different strains and submit jobs to qsub
+# This script is used to create directories for different strains and submit jobs (qsub or sbatch)
 
 # Define input files
 input_file="INCAR POSCAR POTCAR KPOINTS"
@@ -36,6 +36,21 @@ then
 	exit 1
 fi
 
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
+
+# Locate deform_strain.sh: old install path, else next to vasp_common.sh (this repo), else PATH
+deform_strain=$(find_tool /home/561/hm1876/.local/bin/deform_strain.sh)
+if [ -z "$deform_strain" ]
+then
+	echo -e "${ORANGE}Error: deform_strain.sh not found (install path, script directory or PATH)"
+	exit 1
+fi
+
+SUB_CMD=$(submit_cmd_of "$runscript")
+
 # Choose the shear strain direction
 read -p "Please select the strain direction (XX, YY, ZZ, XY, XZ, YZ): " shear_strain_direction
 
@@ -55,7 +70,7 @@ do
 	# Run deform_strain
 	echo -e "${GREEN}Running deform_strain for strain $arg..."
 	new_arg=$(echo "$arg - 1" | bc)
-	/home/561/hm1876/.local/bin/deform_strain.sh $shear_strain_direction $new_arg
+	bash "$deform_strain" $shear_strain_direction $new_arg
 	echo -e "${ORANGE}.............................................................................."
 
 	cd ..
@@ -67,7 +82,7 @@ echo -e "${ORANGE}..............................................................
 read -p "Submit all jobs? [Y/n]" choice
 
 if [[ $choice == "Y" || $choice == "y" ]]; then
-	# Loop through the arguments and submit jobs to qsub
+	# Loop through the arguments and submit jobs ($SUB_CMD)
 	for arg in "$@"
 	do
 		if [ -d "strain_$arg" ] && [ -n "$(find "strain_$arg" -maxdepth 1 -name '*OUTCAR' -print -quit)" ]; then
@@ -78,7 +93,7 @@ if [[ $choice == "Y" || $choice == "y" ]]; then
 
 		cd "strain_$arg"
 		echo -e "${GREEN}Submitting job for strain $arg..."
-		qsub $runscript
+		$SUB_CMD $runscript
 		echo -e "${ORANGE}.............................................................................."
 		cd ..
 	done

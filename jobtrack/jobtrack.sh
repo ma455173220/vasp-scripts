@@ -77,8 +77,9 @@ smart_submit() {
     local output
     if [ "$scheduler" = "PBS" ]; then
         output=$(qsub "$submit_script" 2>&1)
+        local rc=$?
         echo "$output"
-        if [ $? -eq 0 ]; then
+        if [ $rc -eq 0 ]; then
             log_submission "$submit_script" "$output" "$scheduler"
         else
             echo -e "${RED}Submission failed${NC}"
@@ -86,8 +87,9 @@ smart_submit() {
         fi
     elif [ "$scheduler" = "SLURM" ]; then
         output=$(sbatch "$submit_script" 2>&1)
+        local rc=$?
         echo "$output"
-        if [ $? -eq 0 ]; then
+        if [ $rc -eq 0 ]; then
             log_submission "$submit_script" "$output" "$scheduler"
         else
             echo -e "${RED}Submission failed${NC}"
@@ -197,13 +199,14 @@ today_summary() {
     echo ""
     echo -e "${BLUE}Currently Running (Local)${NC}\n"
     local local_running=0
-    grep "^$today" "$LOG_FILE" | grep "|LOCAL$" | while IFS='|' read -r timestamp dir pid type; do
+    # read via process substitution so local_running is set in this shell
+    while IFS='|' read -r timestamp dir pid type; do
         if ps -p "$pid" > /dev/null 2>&1; then
             local short_dir=$(echo "$dir" | awk -F'/' '{n=NF; if(n>1) print $(n-1)"/"$n; else print $n}')
             printf "${MAGENTA}PID ${pid}${NC} - ${short_dir}\n"
             local_running=1
         fi
-    done
+    done < <(grep "^$today" "$LOG_FILE" | grep "|LOCAL$")
     
     if [ $local_running -eq 0 ]; then
         echo "No local jobs running"

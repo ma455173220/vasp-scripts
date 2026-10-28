@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
+fatband_analysis.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
 
 用途：对任意体系，按 元素 × 轨道壳层(s/p/d[/f]) 批量生成 fatband 图，
       用于 Wannier 投影集的选取（对照能量窗口内哪些成分权重大）。
@@ -16,7 +16,7 @@ fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
    PROCAR / OUTCAR / POSCAR / KPOINTS 四个文件。
 
 2. 运行（无需任何改动，原子索引和 E_F 全自动）：
-       python fatband_batch.py -d /path/to/band_dir
+       python fatband_analysis.py -d /path/to/band_dir
 
 3. 看图：所有 fatband_<元素>_<壳层>.png 用同一色标 (0-0.5)，
    直接比较颜色深浅 => 费米面附近哪些面板颜色深，
@@ -39,10 +39,10 @@ fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
   -o, --outdir DIR      图片输出目录（默认当前目录）
 
 常用组合示例：
-  python fatband_batch.py                              # 全默认
-  python fatband_batch.py -e -6 6                      # 聚焦费米面
-  python fatband_batch.py --species Ba Cu --shells s d # BaCu 关键壳层
-  python fatband_batch.py -d band/ -o figs/ --cmap viridis
+  python fatband_analysis.py                              # 全默认
+  python fatband_analysis.py -e -6 6                      # 聚焦费米面
+  python fatband_analysis.py --species Ba Cu --shells s d # BaCu 关键壳层
+  python fatband_analysis.py -d band/ -o figs/ --cmap viridis
 
 ════════════════════════════════════════════════════════════════════
 三、想改脚本时改哪儿（按场景）
@@ -93,9 +93,19 @@ fatband_batch.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 import os
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import read_poscar  # noqa: E402
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -127,14 +137,12 @@ def reset_pyprocar_cache(dirname: Path):
 
 
 def parse_poscar_species(poscar: Path):
-    """返回 {元素: [原子索引(0-based)]}，按 POSCAR 顺序。"""
-    lines = poscar.read_text().splitlines()
-    symbols = lines[5].split()
-    if any(s.isdigit() for s in symbols):
+    """返回 {元素: [原子索引(0-based)]}，按 POSCAR 顺序（VASP 6.4 的 Ti_pv/<hash> → Ti）。"""
+    p = read_poscar(str(poscar))
+    if p.species is None:
         sys.exit("POSCAR 第 6 行不是元素名（VASP4 格式？）。请用 VASP5+ 格式的 POSCAR。")
-    counts = [int(x) for x in lines[6].split()]
     species, i = {}, 0
-    for sym, n in zip(symbols, counts):
+    for sym, n in zip(p.species, p.counts):
         species.setdefault(sym, []).extend(range(i, i + n))
         i += n
     return species

@@ -6,6 +6,14 @@ echo "  VASP Gibbs/Frequency Calculation Setup"
 echo "============================================"
 echo ""
 
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
+
+# Locate center-of-mass.py: next to vasp_common.sh (this repo), then PATH
+COM_SCRIPT=$(find_tool center-of-mass.py)
+
 # Ask for calculation type
 echo "Please select calculation type:"
 echo "  1) IDM frequency calculation (Improved Dimer Method - NWRITE=3)"
@@ -67,8 +75,13 @@ echo "Starting setup for $calc_mode..."
 
 # 1. Create Gibbs folder
 if [ -d "$folder_name" ]; then
-    echo "Warning: $folder_name folder already exists, will remove and recreate"
-    rm -rf "$folder_name"
+    echo "Warning: $folder_name folder already exists (it may hold a finished calculation)"
+    if confirm "Delete it and recreate?"; then
+        rm -rf "$folder_name"
+    else
+        echo "Keeping existing $folder_name - nothing done."
+        exit 1
+    fi
 fi
 mkdir "$folder_name"
 echo "Created $folder_name folder"
@@ -110,7 +123,11 @@ fi
 if [ "$use_dipole" = true ]; then
     # Run center-of-mass.py to get center of mass coordinates
     echo "Running center-of-mass.py to calculate center of mass..."
-    output=$(center-of-mass.py POSCAR)
+    if [ -z "$COM_SCRIPT" ]; then
+        echo "Error: center-of-mass.py not found (script directory or PATH)"
+        exit 1
+    fi
+    output=$(python3 "$COM_SCRIPT" POSCAR)
     echo "$output"
 
     # Extract content within [] as dipol variable
@@ -124,8 +141,8 @@ if [ "$use_dipole" = true ]; then
     # Modify DIPOL value in INCAR file
     echo "Modifying INCAR file..."
     if [ -f "INCAR" ]; then
-        # Only modify DIPOL line (not affecting LDIPOL and IDIPOL)
-        sed -i "s/^DIPOL\s*=.*/DIPOL = $dipol/" INCAR
+        # Only modify DIPOL (not LDIPOL / IDIPOL)
+        incar_set DIPOL "$(echo $dipol)"
         echo "Updated DIPOL = $dipol"
     else
         echo "Error: INCAR file does not exist"
@@ -135,9 +152,9 @@ else
     # Comment out dipole-related parameters in INCAR
     echo "Disabling dipole correction in INCAR..."
     if [ -f "INCAR" ]; then
-        sed -i 's/^DIPOL\s*=/#DIPOL =/' INCAR
-        sed -i 's/^LDIPOL\s*=/#LDIPOL =/' INCAR
-        sed -i 's/^IDIPOL\s*=/#IDIPOL =/' INCAR
+        incar_comment DIPOL
+        incar_comment LDIPOL
+        incar_comment IDIPOL
         echo "Commented out DIPOL, LDIPOL, IDIPOL"
     else
         echo "Error: INCAR file does not exist"
@@ -149,70 +166,38 @@ fi
 echo "Modifying structure optimization parameters..."
 
 # Change NSW to 1
-sed -i 's/NSW\s*=\s*[0-9]*/NSW = 1/' INCAR
+incar_set NSW 1
 echo "Changed NSW to 1"
 
-# Comment out the entire line: IOPT = 7 ; POTIM = 0 ; IBRION = 3
-sed -i 's/^IOPT = 7 ; POTIM = 0 ; IBRION = 3/#IOPT = 7 ; POTIM = 0 ; IBRION = 3/' INCAR
-echo "Commented out optimizer setting line"
-
-# Comment out NEB-related parameters (lines starting with IMAGES, SPRING, LCLIMB, ICHAIN, IOPT)
-sed -i 's/^IMAGES\s*=/#IMAGES =/' INCAR
-sed -i 's/^SPRING\s*=/#SPRING =/' INCAR
-sed -i 's/^LCLIMB\s*=/#LCLIMB =/' INCAR
-sed -i 's/^ICHAIN\s*=/#ICHAIN =/' INCAR
-sed -i 's/^IOPT\s*=/#IOPT =/' INCAR
-echo "Commented out NEB-related parameters (IMAGES, SPRING, LCLIMB, ICHAIN, IOPT)"
+# Comment out the VTST optimizer (IOPT; its POTIM / IBRION are reset below)
+# and the NEB-related parameters (IMAGES, SPRING, LCLIMB, ICHAIN)
+for tag in IOPT IMAGES SPRING LCLIMB ICHAIN; do
+    incar_comment "$tag"
+done
+echo "Commented out optimizer / NEB-related parameters (IOPT, IMAGES, SPRING, LCLIMB, ICHAIN)"
 
 # Modify EDIFF to 1E-07
-if grep -q "^EDIFF\s*=" INCAR; then
-    sed -i 's/^EDIFF\s*=.*/EDIFF = 1E-07/' INCAR
-    echo "Changed EDIFF to 1E-07"
-else
-    echo "EDIFF = 1E-07" >> INCAR
-    echo "Added EDIFF = 1E-07"
-fi
+incar_set EDIFF 1E-07
+echo "Set EDIFF = 1E-07"
 
 # 6. Set Gibbs calculation parameters
 echo "Setting Gibbs calculation parameters..."
-
-# Set or modify IBRION to 5
-if grep -q "^IBRION\s*=" INCAR; then
-    sed -i 's/^IBRION\s*=.*/IBRION = 5/' INCAR
-else
-    echo "IBRION = 5" >> INCAR
-fi
-
-# Set or modify POTIM to 0.015
-if grep -q "^POTIM\s*=" INCAR; then
-    sed -i 's/^POTIM\s*=.*/POTIM = 0.015/' INCAR
-else
-    echo "POTIM = 0.015" >> INCAR
-fi
-
-# Set or modify NFREE to 2
-if grep -q "^NFREE\s*=" INCAR; then
-    sed -i 's/^NFREE\s*=.*/NFREE = 2/' INCAR
-else
-    echo "NFREE = 2" >> INCAR
-fi
+incar_set IBRION 5
+incar_set POTIM 0.015
+incar_set NFREE 2
 
 # Handle NWRITE based on calculation type
 if [ "$nwrite_value" = "default" ]; then
-    # For regular Gibbs calculation, remove NWRITE line if it exists
-    if grep -q "^NWRITE\s*=" INCAR; then
-        sed -i '/^NWRITE\s*=/d' INCAR
-        echo "Removed NWRITE (using default value)"
+    # For regular Gibbs calculation, comment NWRITE out if it is set
+    if incar_get NWRITE >/dev/null; then
+        incar_comment NWRITE
+        echo "Commented out NWRITE (using default value)"
     else
         echo "NWRITE not found in INCAR (will use default value)"
     fi
 else
     # For IDM calculation, set NWRITE = 3
-    if grep -q "^NWRITE\s*=" INCAR; then
-        sed -i "s/^NWRITE\s*=.*/NWRITE = $nwrite_value/" INCAR
-    else
-        echo "NWRITE = $nwrite_value" >> INCAR
-    fi
+    incar_set NWRITE "$nwrite_value"
     echo "Set NWRITE = $nwrite_value (for IDM frequency analysis)"
 fi
 
@@ -224,9 +209,9 @@ if [ -f "vasp_runscript" ]; then
     sed -i 's/VASP_EXE="vasp_std"/VASP_EXE="vasp_gam"/' vasp_runscript
     echo "Changed VASP_EXE to vasp_gam"
     
-    # Modify SBATCH ntasks to 128
-    sed -i 's/^#SBATCH --ntasks=[0-9]*/#SBATCH --ntasks=128/' vasp_runscript
-    echo "Changed #SBATCH --ntasks to 128"
+    # Modify SBATCH ntasks (--ntasks-per-node in vasp_runscript_setonix, or --ntasks) to 128
+    sed -i 's/^#SBATCH --ntasks\(-per-node\)\?=[0-9]*/#SBATCH --ntasks\1=128/' vasp_runscript
+    echo "Changed #SBATCH --ntasks(-per-node) to 128"
     
     # Modify SBATCH nodes to 1
     sed -i 's/^#SBATCH --nodes=[0-9]*/#SBATCH --nodes=1/' vasp_runscript
@@ -249,26 +234,25 @@ else
 fi
 echo ""
 echo "=== Key INCAR Parameters ==="
-grep -E "^(NSW|IBRION|POTIM|NFREE|EDIFF)" INCAR
+grep -iE "^[[:space:]]*(NSW|IBRION|POTIM|NFREE|EDIFF)[[:space:]]*=" INCAR
 if [ "$use_dipole" = true ]; then
-    grep "^DIPOL" INCAR
+    grep -iE "^[[:space:]]*DIPOL" INCAR
 fi
 if [ "$nwrite_value" != "default" ]; then
-    grep "^NWRITE" INCAR
+    grep -iE "^[[:space:]]*NWRITE" INCAR
 else
     echo "NWRITE = (default - not specified)"
 fi
 echo ""
 echo "=== Commented Lines ==="
-grep "^#IOPT = 7" INCAR
-grep "^#IMAGES\|^#SPRING\|^#LCLIMB\|^#ICHAIN\|^#IOPT" INCAR 2>/dev/null || echo "No commented NEB parameters found"
+grep -iE "^#[[:space:]]*(IMAGES|SPRING|LCLIMB|ICHAIN|IOPT)" INCAR 2>/dev/null || echo "No commented NEB parameters found"
 if [ "$use_dipole" = false ]; then
-    grep "^#DIPOL\|^#LDIPOL\|^#IDIPOL" INCAR 2>/dev/null || echo "No dipole parameters found in INCAR"
+    grep -iE "^#[[:space:]]*(DIPOL|LDIPOL|IDIPOL)" INCAR 2>/dev/null || echo "No dipole parameters found in INCAR"
 fi
 echo ""
 echo "=== Key Settings in vasp_runscript ==="
 grep "VASP_EXE=" vasp_runscript 2>/dev/null || echo "VASP_EXE setting not found"
-grep "#SBATCH --ntasks=" vasp_runscript 2>/dev/null || echo "ntasks setting not found"
+grep -E "#SBATCH --ntasks(-per-node)?=" vasp_runscript 2>/dev/null || echo "ntasks setting not found"
 grep "#SBATCH --nodes=" vasp_runscript 2>/dev/null || echo "nodes setting not found"
 echo ""
 echo "============================================"

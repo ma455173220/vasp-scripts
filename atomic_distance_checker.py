@@ -3,49 +3,25 @@
 Check for atoms too close in a VASP POSCAR/CONTCAR.
 
 Usage:
-  python check_close_atoms.py                        # default cutoff 1.5 Å
-  python check_close_atoms.py CONTCAR --cutoff 1.0
-  python check_close_atoms.py --pair Mo-Se:2.4 --pair Se-Se:3.0
-  python check_close_atoms.py --cutoff 1.5 --pair Mo-Se:2.4
+  python atomic_distance_checker.py                        # default cutoff 1.5 Å
+  python atomic_distance_checker.py CONTCAR --cutoff 1.0
+  python atomic_distance_checker.py --pair Mo-Se:2.4 --pair Se-Se:3.0
+  python atomic_distance_checker.py --cutoff 1.5 --pair Mo-Se:2.4
 """
 
-import numpy as np
 import argparse
+import os
+import shutil
 import sys
-from itertools import combinations
 
-
-def read_poscar(filename):
-    with open(filename) as f:
-        lines = f.readlines()
-    scale = float(lines[1].strip())
-    lattice = np.array([[float(x) for x in lines[i].split()] for i in range(2, 5)]) * scale
-    elem_line = lines[5].split()
-    try:
-        float(elem_line[0])
-        counts = [int(x) for x in elem_line]
-        elements = [f"X{i}" for i in range(len(counts))]
-        coord_line = 6
-    except ValueError:
-        elements = elem_line
-        counts = [int(x) for x in lines[6].split()]
-        coord_line = 7
-    coord_type = lines[coord_line].strip()[0].lower()
-    coords, labels = [], []
-    for elem, count in zip(elements, counts):
-        for _ in range(count):
-            coords.append([float(x) for x in lines[coord_line + 1 + len(coords)].split()[:3]])
-            labels.append(elem)
-    coords = np.array(coords)
-    if coord_type == 'd':
-        coords = coords @ lattice
-    return lattice, coords, labels
-
-
-def min_image_dist(r1, r2, lattice):
-    diff = (r1 - r2) @ np.linalg.inv(lattice)
-    diff -= np.round(diff)
-    return np.linalg.norm(diff @ lattice)
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import neighbor_pairs, read_poscar  # noqa: E402
 
 
 def parse_pairs(pair_args):
@@ -71,16 +47,21 @@ def main():
     args = parser.parse_args()
 
     pair_cutoffs = parse_pairs(args.pair)
-    lattice, coords, labels = read_poscar(args.poscar)
+    p = read_poscar(args.poscar)   # VASP 4/5/6 ("Ti_pv/<hash>"), selective dynamics, Cartesian
+    if p.species is None:          # VASP4: no species line
+        labels = [f"X{t}" for t, n in enumerate(p.counts) for _ in range(n)]
+    else:
+        labels = p.symbols
+    natoms = p.natoms
 
     errors = []
-    for i, j in combinations(range(len(coords)), 2):
-        d = min_image_dist(coords[i], coords[j], lattice)
+    # true minimum image (27 neighbouring cells), vectorised per atom
+    for i, j, d in neighbor_pairs(p.frac, p.lattice, max([args.cutoff] + list(pair_cutoffs.values()))):
         cut = pair_cutoffs.get(frozenset({labels[i], labels[j]}), args.cutoff)
         if d < cut:
             errors.append((i, j, d, labels[i], labels[j], cut))
 
-    print(f"File: {args.poscar}  |  {len(coords)} atoms")
+    print(f"File: {args.poscar}  |  {natoms} atoms")
     if pair_cutoffs:
         for k, v in pair_cutoffs.items():
             a, b = sorted(k)

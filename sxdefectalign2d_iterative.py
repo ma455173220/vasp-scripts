@@ -1,14 +1,35 @@
 #!/usr/bin/env python3
+"""
+Run sxdefectalign2d for a range of --shift values and plot the potentials.
+
+Usage:
+  sxdefectalign2d_iterative.py --vref <bulk LOCPOT> [--vdef ./LOCPOT] [--ecut 36.75]
+  (or set the environment variable VREF_LOCPOT instead of --vref)
+
+Example:
+  sxdefectalign2d_iterative.py --vref /scratch/g46/hm1876/jahan/MoSe2_exercise/Defects/MoSe2_bulk_new/vasp_gam/LOCPOT
+"""
 import os
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Define cutoff energy (in Ry) as a variable for easy modification
-ecut = 36.75  
+parser = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--vref", default=os.environ.get("VREF_LOCPOT"),
+                    help="Path to the bulk (reference) LOCPOT (default: $VREF_LOCPOT)")
+parser.add_argument("--vdef", default="./LOCPOT", help="Path to the defective system LOCPOT (default: ./LOCPOT)")
+parser.add_argument("--ecut", type=float, default=36.75, help="Cutoff energy in Ry (default: 36.75)")
+args = parser.parse_args()
+if not args.vref:
+    parser.error("bulk LOCPOT required: pass --vref <path> or set VREF_LOCPOT")
+
+# Define cutoff energy (in Ry)
+ecut = args.ecut
 
 # Define paths for the defective system and bulk LOCPOT files
-vdef_path = "./LOCPOT"  # Path to the defective system LOCPOT
-vref_path = "/scratch/g46/hm1876/jahan/MoSe2_exercise/Defects/MoSe2_bulk_new/vasp_gam/LOCPOT"  # Path to the bulk LOCPOT
+vdef_path = args.vdef  # Path to the defective system LOCPOT
+vref_path = args.vref  # Path to the bulk LOCPOT
 
 # Ensure 'figs' directory exists
 os.makedirs("figs", exist_ok=True)

@@ -6,7 +6,7 @@ epsilon = 16.93076923076923;
 
 charge {
 posZ = 10; // estimated position 
-Q = -2.; // Classical charge state : −1
+Q = -2.; // Q = -(charge state); set per folder by sxdefectalign2d_workflow.sh
 }
 
 isolated { 

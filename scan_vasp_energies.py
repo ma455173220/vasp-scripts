@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-vasp_echeck.py  —  VASP Energy Checker
+scan_vasp_energies.py  —  VASP Energy Checker
 =======================================
 用途
 ----
 扫描当前目录下所有一级子文件夹中的 VASP 计算，
   1. 检测任务是否成功收敛（读 OUTCAR）
   2. 提取最终能量 E0（读 OSZICAR）
-  3. 按总能量排序，输出人类可读的 .log 和机器可读的 .csv
+  3. 按总能量排序，输出人类可读的 .log（vasp_energy_scan.log）
 
 使用方式
 --------
   1. 将本脚本放在「包含各结构子文件夹的父目录」下，例如：
 
        relaxation/
-       ├── vasp_echeck.py      ← 脚本放这里
+       ├── scan_vasp_energies.py      ← 脚本放这里
        ├── struct_A/
        │   ├── INCAR
        │   ├── OUTCAR
@@ -25,7 +25,7 @@ vasp_echeck.py  —  VASP Energy Checker
 
   2. 进入该父目录后运行：
 
-       python3 vasp_echeck.py
+       python3 scan_vasp_energies.py
 
   3. 脚本会在当前目录生成：
        vasp_energy_scan.log   —— 对齐格式，终端友好，便于快速浏览
@@ -33,28 +33,39 @@ vasp_echeck.py  —  VASP Energy Checker
 注意事项
 --------
 - 仅扫描一级子文件夹（不递归），适合「一个文件夹 = 一个结构」的布局
-- 收敛判据：OUTCAR 含 "reached required accuracy"
+- 收敛判据：与 VASP_JOB_PARAMETERS 相同（vasp_common.job_status）：
+    NSW=0（静态）看 "EDIFF is reached"；IBRION=1/2/3/44（弛豫）还需 "reached required accuracy"
+  只读 OUTCAR 末尾（必要时逐行扫描），不把整个文件读进内存
+- 排序：所有结构都有原子数时按 E/atom 排序（ΔE 也按每原子），否则按总能量
 - 能量来源：OSZICAR 最后一行 E0（已去 entropy 外推值，适合结构比较）
 - 若子文件夹缺少 OUTCAR / OSZICAR，会归入「失败」列表并注明原因
 """
 
 import os
-import re
 import glob
+import shutil
+import sys
 from datetime import datetime
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import job_status, oszicar_last, outcar_natoms  # noqa: E402
 
 
 def check_vasp_success(folder):
-    """检查 VASP 是否成功完成（OUTCAR 中含 'reached required accuracy'）"""
-    outcar = os.path.join(folder, "OUTCAR")
-    if not os.path.isfile(outcar):
-        return False, "OUTCAR missing"
-    with open(outcar, "r", errors="replace") as f:
-        content = f.read()
-    if "reached required accuracy" in content:
+    """检查 VASP 是否成功完成（规则同 VASP_JOB_PARAMETERS；静态计算 NSW=0 也算）"""
+    status, reason = job_status(folder, final=False)
+    if status == "converged":
         return True, "OK"
-    if "General timing and accounting" in content:
+    if status == "unconverged":
         return False, "finished but NOT converged"
+    if reason == "OUTCAR not found":
+        return False, "OUTCAR missing"
     return False, "incomplete / still running"
 
 
@@ -63,16 +74,10 @@ def get_final_energy(folder):
     oszicar = os.path.join(folder, "OSZICAR")
     if not os.path.isfile(oszicar):
         return None, "OSZICAR missing"
-    energy = None
-    pattern = re.compile(r"E0=\s*([-\d.E+]+)")
-    with open(oszicar, "r", errors="replace") as f:
-        for line in f:
-            m = pattern.search(line)
-            if m:
-                energy = float(m.group(1))
-    if energy is None:
+    last = oszicar_last(oszicar)
+    if last is None or last["E0"] is None:
         return None, "E0 not found in OSZICAR"
-    return energy, "OK"
+    return last["E0"], "OK"
 
 
 def get_natoms(folder):
@@ -80,13 +85,7 @@ def get_natoms(folder):
     outcar = os.path.join(folder, "OUTCAR")
     if not os.path.isfile(outcar):
         return None
-    with open(outcar, "r", errors="replace") as f:
-        for line in f:
-            if "NIONS" in line:
-                m = re.search(r"NIONS\s*=\s*(\d+)", line)
-                if m:
-                    return int(m.group(1))
-    return None
+    return outcar_natoms(outcar)
 
 
 def main():
@@ -121,7 +120,11 @@ def main():
         epa = energy / natoms if natoms else None
         results_ok.append((energy, epa, natoms, name))
 
-    results_ok.sort(key=lambda x: x[0])
+    # 所有结构都有原子数 → 按 E/atom 排序（与 ΔE (meV/atom) 一致）；否则按总能量
+    if results_ok and all(r[1] is not None for r in results_ok):
+        results_ok.sort(key=lambda x: x[1])
+    else:
+        results_ok.sort(key=lambda x: x[0])
 
     # ── 写 LOG ──────────────────────────────────────────────────
     lines = []

@@ -8,6 +8,12 @@
 ! Input ::  XDATCAR (vasp5 format)                          
 ! Output::  rmsd.dat, xdat.dat, xdat.xyz, coord_num_.dat
 ! Modification: Added system-wide RMSD calculation
+! 2026-10: species line "Ti_pv/<hash>" (VASP 6.4) parsed token by token; lattice
+!          scale factor (incl. negative = volume) applied to the vectors, so
+!          angles / volume / RMSD are right for scale /= 1; coordination numbers
+!          use each frame's own lattice (NPT); XxYy.dat names trimmed and
+!          overwritten on a re-run.
+! Build:  gfortran -O2 -o vasp-xdat-analyzer vasp-xdat-analyzer.f90   (or: make)
 !==========================================================================
 PROGRAM  XDAT
 !==========================================================================
@@ -21,6 +27,7 @@ INTEGER :: ntype,nr,maxatom,filein,fileout,i,k,m,IOstatus=0,p,q,j,n,s,t,bondtype
 REAL(ap), DIMENSION(:), ALLOCATABLE :: xarray, yarray, zarray, disp
 REAL(ap), DIMENSION(:,:), ALLOCATABLE :: xarrayimag,yarrayimag,zarrayimag
 REAL(ap), DIMENSION(:,:,:), ALLOCATABLE :: cutoff
+REAL(ap), DIMENSION(:,:,:), ALLOCATABLE :: lat, lattmp   ! lattice vectors of every frame (NPT)
 REAL(ap) :: a, b, c, scale, vol, alpha, beta,gamma,x,y,z,xt,yt,zt,pi = 4.*atan(1.), bondlength
 REAL(ap) :: system_rmsd_sum, system_rmsd  ! Added for system RMSD
 REAL(ap) :: dx, dy, dz, atom_disp_sq      ! Added for displacement calculations
@@ -78,14 +85,20 @@ DO WHILE (IOstatus .eq. 0)
     IF (title2 .ne. title1)  GOTO 100      
     IF ((title2 .eq. title1) .and. i==3) WRITE(*,*) "VASP NPT FORMAT"    
   END IF
-  ! read lattice
+  ! read lattice; the scale factor (negative = cell volume) is folded into the
+  ! vectors, so "scale" is 1 from here on
   READ(filein,*) scale
   READ(filein,*) avect(1), avect(2), avect(3)
-  a = scale*sqrt(avect(1)*avect(1) + avect(2)*avect(2) + avect(3)*avect(3))
   READ(filein,*) bvect(1), bvect(2), bvect(3)
-  b = scale*sqrt(bvect(1)*bvect(1) + bvect(2)*bvect(2) + bvect(3)*bvect(3))
   READ(filein,*) cvect(1), cvect(2), cvect(3)
-  c = scale*sqrt(cvect(1)*cvect(1) + cvect(2)*cvect(2) + cvect(3)*cvect(3))
+  IF (scale < 0.0_ap) scale = (-scale / ABS(dot_product(avect, cross(bvect,cvect))))**(1.0_ap/3.0_ap)
+  avect = avect*scale
+  bvect = bvect*scale
+  cvect = cvect*scale
+  scale = 1.0_ap
+  a = sqrt(avect(1)*avect(1) + avect(2)*avect(2) + avect(3)*avect(3))
+  b = sqrt(bvect(1)*bvect(1) + bvect(2)*bvect(2) + bvect(3)*bvect(3))
+  c = sqrt(cvect(1)*cvect(1) + cvect(2)*cvect(2) + cvect(3)*cvect(3))
   alpha = ACOS((bvect(1)*cvect(1) + bvect(2)*cvect(2) + bvect(3)*cvect(3))/(b*c))
   beta = ACOS((avect(1)*cvect(1) + avect(2)*cvect(2) + avect(3)*cvect(3))/(a*c))
   gamma = ACOS((avect(1)*bvect(1) + avect(2)*bvect(2) + avect(3)*bvect(3))/(a*b))
@@ -103,7 +116,18 @@ DO WHILE (IOstatus .eq. 0)
   READ(filein,*)
 
   !read coordinates and do manipulation
-  100   WRITE(26,"(I6)") maxatom
+  100   CONTINUE
+  ! keep this frame's lattice for the coordination analysis (NPT cells change)
+  IF (.NOT. ALLOCATED(lat)) ALLOCATE(lat(3,3,1024))
+  IF (i > SIZE(lat,3)) THEN
+    ALLOCATE(lattmp(3,3,2*SIZE(lat,3)))
+    lattmp(:,:,1:SIZE(lat,3)) = lat
+    CALL MOVE_ALLOC(lattmp, lat)
+  END IF
+  lat(:,1,i) = avect
+  lat(:,2,i) = bvect
+  lat(:,3,i) = cvect
+  WRITE(26,"(I6)") maxatom
   WRITE(26,*) "Conifiguration", i
   nr = 0 
   ALLOCATE(disp(ntype))
@@ -231,6 +255,10 @@ OPEN(26,file='xdat.xyz', status='old')
 DO m=1, i-1
   READ(26,*)
   READ(26,*)
+  ! lattice of this frame
+  avect = lat(:,1,m)
+  bvect = lat(:,2,m)
+  cvect = lat(:,3,m)
   n = 0
   ! read coordinates and creat image coordinates
   DO k=1, ntype
@@ -358,15 +386,15 @@ DO m=1, i-1
     DO j=k, ntype
       n=n+1;fileout=45+n
       IF(m==1) THEN 
-        WRITE(fnm,'(A2,A2,A4)') elemnm(k),elemnm(j),".dat"
-        OPEN(fileout,file=fnm, status='new')
+        fnm = TRIM(elemnm(k))//TRIM(elemnm(j))//".dat"
+        OPEN(fileout,file=TRIM(fnm), status='replace')
       END IF
       WRITE(fileout,*) coordnum(:,k,j)
       IF(j.ne.k) THEN
         n=n+1; fileout=45+n
         IF(m==1) THEN
-          WRITE(fnm,'(A2,A2,A4)') elemnm(j),elemnm(k),".dat"
-          OPEN(fileout,file=fnm, status='new')
+          fnm = TRIM(elemnm(j))//TRIM(elemnm(k))//".dat"
+          OPEN(fileout,file=TRIM(fnm), status='replace')
         END IF
         WRITE(fileout,*) coordnum(:,j,k)
       END IF
@@ -440,39 +468,42 @@ CONTAINS
  
  END SUBROUTINE getatmnr
 
- ! get the element name
+ ! get the element names: blank-separated tokens of the species line; POTCAR
+ ! suffixes are cut at '_' or '/' (Ti_pv, Ti_pv/<hash> -> Ti). A list-directed
+ ! read cannot be used: '/' ends list-directed input.
  SUBROUTINE getelemtnm(line,elemnm,ntype)
  CHARACTER(len=255),intent(IN):: line
- CHARACTER(len=255):: line2,line3
  CHARACTER(len=2),dimension(:),ALLOCATABLE, intent(OUT) :: elemnm
- CHARACTER(len=2),dimension(:),ALLOCATABLE :: elemt
- INTEGER, intent(OUT) :: ntype 
- INTEGER :: ios, i, pos
+ CHARACTER(len=2) :: elemt(100)
+ INTEGER, intent(OUT) :: ntype
+ INTEGER :: i, j, k, n
 
- line2=line
- ios=0
- i = 0
- ALLOCATE(elemt(20))
-
- DO WHILE (ios==0)
-   i = i + 1
-   read(line2,*,IOSTAT=ios) elemt(i)
-   IF (ios==0) then
-     elemt(i) = ADJUSTL(elemt(i))
-     pos = Index(line2,trim(elemt(i))) + len_trim(elemt(i))
-     line2=""
-     line2(pos:255)=line(pos:255)
-     IF (len_trim(line2)<=0) then
-       ios=10
-     END IF
+ ntype = 0
+ n = len_trim(line)
+ i = 1
+ DO WHILE (i <= n)
+   IF (line(i:i) == ' ' .or. line(i:i) == char(9)) THEN
+     i = i + 1
+     CYCLE
    END IF
+   j = i
+   DO WHILE (j <= n)
+     IF (line(j:j) == ' ' .or. line(j:j) == char(9)) EXIT
+     j = j + 1
+   END DO
+   k = i
+   DO WHILE (k < j)
+     IF (line(k:k) == '_' .or. line(k:k) == '/') EXIT
+     k = k + 1
+   END DO
+   IF (k > i .and. ntype < 100) THEN
+     ntype = ntype + 1
+     elemt(ntype) = line(i:min(k-1, i+1))
+   END IF
+   i = j
  END DO
- ntype = i 
  ALLOCATE(elemnm(ntype))
- DO WHILE (i>0)
-    elemnm(i) = elemt(i)
-    i = i - 1
- END DO
+ elemnm = elemt(1:ntype)
  END SUBROUTINE getelemtnm
 
  ! calculate number of combinations by choosing k from n

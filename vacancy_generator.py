@@ -25,7 +25,16 @@ from pathlib import Path
 
 import numpy as np
 import spglib
-from ase.io import read, write
+from ase.io import write
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import group_order, read_atoms  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -338,14 +347,14 @@ def interactive_setup():
 
 def generate_potcar(workdir):
     """
-    在 workdir 内运行 `echo -e "103\n" | vaspkit` 生成 POTCAR。
+    在 workdir 内运行 vaspkit（输入 "103"）生成 POTCAR。
     vaspkit 会读取当前目录的 POSCAR 自动判断元素顺序，因此必须在
     POSCAR 已写出之后、进入该目录再调用。
     """
-    cmd = 'echo -e "103\n" | vaspkit'
+    # 直接把 "103" 写入 vaspkit 的 stdin（不经过 /bin/sh，避免 echo -e 的兼容问题）
     try:
         result = subprocess.run(
-            cmd, shell=True, cwd=str(workdir),
+            ["vaspkit"], input="103\n", cwd=str(workdir),
             capture_output=True, text=True, timeout=60
         )
         potcar_path = Path(workdir) / "POTCAR"
@@ -387,8 +396,9 @@ def write_structures(unique, nvac, element, outdir, sub_element=None, cfg=None):
             )
             print(f"  [微扰] {dirname.name}: 影响 {n_perturbed} 个原子")
 
-        # ── 写 POSCAR ──
+        # ── 写 POSCAR ──（同种元素连续：置换原子不再把一个物种拆成多段）
         poscar_out = dirname / "POSCAR"
+        final_atoms = final_atoms[group_order(final_atoms.get_chemical_symbols())]
         write(str(poscar_out), final_atoms, format="vasp", direct=True)
         print(f"  [写出] {i+1:>3}  {cand['label']:<42} → {dirname.name}/POSCAR")
 
@@ -472,14 +482,14 @@ def main():
 
     # ── 读取结构 ──
     try:
-        atoms = read(args.file)
+        atoms = read_atoms(args.file)   # falls back to vasp_common for "Ti_pv/<hash>" species
         if "momenta" in atoms.arrays:
             del atoms.arrays["momenta"]
     except Exception as e:
         print(f"[错误] 读取结构失败：{e}", file=sys.stderr)
         sys.exit(1)
 
-    mode_str = f"O→{sub_element} 置换" if sub_element else "O 空穴"
+    mode_str = f"{args.element}→{sub_element} 置换" if sub_element else f"{args.element} 空穴"
     print(f"\n读取结构：{args.file}  ({len(atoms)} 原子)")
     print(f"缺陷模式：{mode_str}  ×{args.nvac}\n")
 

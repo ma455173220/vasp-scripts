@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
 
 # Get box size from xyz file or use the default box size parameter
@@ -18,7 +19,12 @@ def get_box_info(input_file_name, default_box_size=[100.0,0.0,0.0,0.0,100.0,0.0,
         try:
             with open(input_file_name) as f:
                 load_lines = f.readlines()
-                box_size_parameter = list(map(float, load_lines[1].strip().split('[')[1].split(']')[0].split(',')))
+                # extended XYZ (ASE, OVITO ...): Lattice="ax ay az bx by bz cx cy cz"
+                lattice = re.search(r'Lattice="([^"]+)"', load_lines[1])
+                if lattice:
+                    box_size_parameter = list(map(float, lattice.group(1).split()))
+                else:
+                    box_size_parameter = list(map(float, load_lines[1].strip().split('[')[1].split(']')[0].split(',')))
                 custom_box_size_found = True
         except (IndexError, ValueError, IOError):
             print("Invalid or missing box size in file. Using default box size.")

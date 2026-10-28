@@ -1,9 +1,16 @@
 #!/bin/bash
 # non_sc_calculation.sh
-# Sets up a Non-Self-Consistent (fixed-charge) VASP calculation from a converged SCF run.
-# Usage: Run in the directory containing a converged VASP calculation.
+# Sets up a static self-consistent run (NSW=0, IBRION=-1, denser k-mesh, writes
+# WAVECAR/CHGCAR/AECCAR) in NON-SC-kmesh-0.03/ from a converged relaxation.
+# (The directory name is historical: this is an SCF run, not ICHARG=11.)
+# Usage: Run in the directory containing a converged VASP relaxation.
 
 set -euo pipefail
+
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 NEW_DIRECTORY="NON-SC-kmesh-0.03"
@@ -19,64 +26,14 @@ NC='\033[0m'
 SEP="---------------------------------------------------------"
 
 # ─── Locate job submission script (PBS or Slurm) ──────────────────────────────
-# Search before any cd; store candidates as absolute paths.
-SUBMISSION_SCRIPT=""
-SCHEDULER=""
-
-# Exclude known VASP binary/output files from the search
-EXCLUDE_NAMES=( CHGCAR WAVECAR vasprun.xml PROCAR POTCAR DOSCAR OUTCAR INCAR
-                CONTCAR POSCAR KPOINTS LOCPOT EIGENVAL IBZKPT OSZICAR )
-
-build_find_excludes() {
-    local args=()
-    for name in "${EXCLUDE_NAMES[@]}"; do
-        args+=(! -name "$name")
-    done
-    echo "${args[@]}"
-}
-
-# Collect ALL candidate scripts and their scheduler types
-declare -a CANDIDATE_SCRIPTS=()
-declare -a CANDIDATE_SCHEDULERS=()
-
-while IFS= read -r -d '' f; do
-    if grep -ql "^#PBS" "$f" 2>/dev/null; then
-        CANDIDATE_SCRIPTS+=("$(realpath "$f")")
-        CANDIDATE_SCHEDULERS+=("PBS")
-    elif grep -ql "^#SBATCH" "$f" 2>/dev/null; then
-        CANDIDATE_SCRIPTS+=("$(realpath "$f")")
-        CANDIDATE_SCHEDULERS+=("Slurm")
-    fi
-done < <(find . -maxdepth 1 -type f $(build_find_excludes) -print0)
-
-case ${#CANDIDATE_SCRIPTS[@]} in
-    0)
-        echo -e "${RED}ERROR:${NC} No PBS (#PBS) or Slurm (#SBATCH) submission script found in the current directory."
-        exit 1
-        ;;
-    1)
-        # Unambiguous — use directly
-        SUBMISSION_SCRIPT="${CANDIDATE_SCRIPTS[0]}"
-        SCHEDULER="${CANDIDATE_SCHEDULERS[0]}"
-        ;;
-    *)
-        # Multiple candidates — prompt user to choose
-        echo -e "${YELLOW}Multiple submission scripts found:${NC}"
-        for i in "${!CANDIDATE_SCRIPTS[@]}"; do
-            printf "  [%d] %s  (%s)\n" "$((i+1))" "$(basename "${CANDIDATE_SCRIPTS[$i]}")" "${CANDIDATE_SCHEDULERS[$i]}"
-        done
-        while true; do
-            read -rp "Select script to use [1-${#CANDIDATE_SCRIPTS[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#CANDIDATE_SCRIPTS[@]} )); then
-                SUBMISSION_SCRIPT="${CANDIDATE_SCRIPTS[$((choice-1))]}"
-                SCHEDULER="${CANDIDATE_SCHEDULERS[$((choice-1))]}"
-                break
-            else
-                echo "  Invalid input. Please enter a number between 1 and ${#CANDIDATE_SCRIPTS[@]}."
-            fi
-        done
-        ;;
-esac
+# Header-limited scan (first 4 KB of each file); asks if there are several ($RUNSCRIPT overrides)
+SUBMISSION_SCRIPT=$(find_runscript || true)
+if [[ -z "$SUBMISSION_SCRIPT" ]]; then
+    echo -e "${RED}ERROR:${NC} No PBS (#PBS) or Slurm (#SBATCH) submission script found in the current directory."
+    exit 1
+fi
+SUBMISSION_SCRIPT="$(realpath "$SUBMISSION_SCRIPT")"
+[[ "$(sched_of "$SUBMISSION_SCRIPT")" == pbs ]] && SCHEDULER="PBS" || SCHEDULER="Slurm"
 
 echo "Submission script: $(basename "$SUBMISSION_SCRIPT")  (scheduler: $SCHEDULER)"
 
@@ -104,30 +61,12 @@ check_d_f_elements() {
         return
     fi
 
-    # Extract element symbols from line 6 (VASP5 format)
-    local elements
-    mapfile -t elements < <(awk 'NR==6 {for (i=1; i<=NF; i++) print $i}' "$poscar")
-
-    # d-block (Groups 3–12, common subset — extend as needed)
-    local d_elements=(Sc Ti V Cr Mn Fe Co Ni Cu Zn
-                      Y Zr Nb Mo Tc Ru Rh Pd Ag Cd
-                      Hf Ta W Re Os Ir Pt Au Hg
-                      La Hg)
-    # Lanthanides
-    local lanthanides=(La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu)
-    # Actinides
-    local actinides=(Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr)
-
-    local transition_elements=("${d_elements[@]}" "${lanthanides[@]}" "${actinides[@]}")
-
-    for el in "${elements[@]}"; do
-        for trans in "${transition_elements[@]}"; do
-            if [[ "$el" == "$trans" ]]; then
-                echo -e "${YELLOW}WARNING:${NC} POSCAR contains d/f-block element '$el'. Modify LMAXMIX accordingly (e.g. LMAXMIX = 4 for d, 6 for f)."
-                return
-            fi
-        done
-    done
+    local el
+    el=$(poscar_df_elements "$poscar" | head -1)   # Ti_pv/<hash> -> Ti
+    if [[ -n "$el" ]]; then
+        echo -e "${YELLOW}WARNING:${NC} POSCAR contains d/f-block element '$el'. Modify LMAXMIX accordingly (e.g. LMAXMIX = 4 for d, 6 for f)."
+        return
+    fi
 
     echo "POSCAR does not contain d-block or f-block elements."
 }
@@ -157,22 +96,23 @@ read_kpoints() {
 
 file_editor() {
     local incar="$NEW_DIRECTORY/INCAR"
-    local sub_script="$SUBMISSION_SCRIPT"  # absolute path — safe after cd
+    # Patch the copy in NEW_DIRECTORY, not the original next to the SCF run
+    local sub_script="$NEW_DIRECTORY/$(basename "$SUBMISSION_SCRIPT")"
 
     # ── INCAR modifications ──
     # Set NSW=0 and IBRION=-1 for non-SCF (static) run
-    sed -i '/^NSW/       s/=.*/=  0       #(Non SCF calculation)/'   "$incar"
-    sed -i '/^IBRION/    s/=.*/=  -1      #(Non SCF calculation)/'   "$incar"
+    incar_set NSW 0 "$incar" "(Non SCF calculation)"
+    incar_set IBRION -1 "$incar" "(Non SCF calculation)"
     # Comment out NELMIN (not meaningful for non-SCF)
-    sed -i '/^NELMIN/    s/^/# /'                                     "$incar"
+    incar_comment NELMIN "$incar"
     # Ensure wavefunctions and charge density are written
-    sed -i 's/\(#\s*\)\?\s*LWAVE\s*=.*/LWAVE  =  .TRUE.   #(Write WAVECAR)/'  "$incar"
-    sed -i 's/\(#\s*\)\?\s*LCHARG\s*=.*/LCHARG =  .TRUE.   #(Write CHGCAR)/'  "$incar"
-    sed -i 's/\(#\s*\)\?\s*LAECHG\s*=.*/LAECHG =  .TRUE.   #(Bader charge)/'  "$incar"
+    incar_set LWAVE .TRUE. "$incar" "(Write WAVECAR)"
+    incar_set LCHARG .TRUE. "$incar" "(Write CHGCAR)"
+    incar_set LAECHG .TRUE. "$incar" "(Bader charge)"
 
-    # Append DOS-related tags only if not already present
-    grep -q '^LORBIT' "$incar" || echo "LORBIT =  11    #(PAW radii for projected DOS)" >> "$incar"
-    grep -q '^NEDOS'  "$incar" || echo "NEDOS  =  2001  #(DOSCAR points)"               >> "$incar"
+    # DOS-related tags only if not already active
+    incar_get LORBIT "$incar" >/dev/null || incar_set LORBIT 11 "$incar" "(PAW radii for projected DOS)"
+    incar_get NEDOS "$incar" >/dev/null || incar_set NEDOS 2001 "$incar" "(DOSCAR points)"
 
     # ── Generate denser k-mesh with vaspkit (run inside NEW_DIRECTORY) ──
     if command -v vaspkit &>/dev/null; then
@@ -194,7 +134,7 @@ file_editor() {
 
     # ── Summary ──
     echo "INCAR key settings after modification:"
-    grep -E "^NSW|^IBRION" "$incar" | awk -F "#" '{print "  " $1}'
+    grep -iE "^[[:space:]]*(NSW|IBRION)[[:space:]]*=" "$incar" | awk -F "#" '{print "  " $1}'
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

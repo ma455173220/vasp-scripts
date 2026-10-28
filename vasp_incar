@@ -25,7 +25,7 @@ NCORE = 32           #(Try NCORE=No. of cpus/node/2)
 
 
 ### DFT + VDW correction ###
-# IVDW = 12            #(10:DFT-D2; 11: DFT-D3)
+# IVDW = 12            #(10: DFT-D2; 11: DFT-D3 zero damping; 12: DFT-D3 Becke-Johnson damping)
 
 
 ### Slab Calculation ###

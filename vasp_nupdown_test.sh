@@ -1,6 +1,6 @@
 #!/bin/bash
 ############################################################
-# Script Name: nupdown_summary_submit.sh
+# Script Name: vasp_nupdown_test.sh
 #
 # Description:
 #   Automates NUPDOWN setup/submission & Postprocess summary
@@ -10,7 +10,17 @@
 #   2. Parent folder contains defect subfolders (e.g. v_O-option1...)
 #   3. Set DEFECT_PATH to match subfolder names (e.g. DEFECT_PATH="v_O*")
 #   4. Run:
-#         bash nupdown_summary_submit.sh
+#         bash vasp_nupdown_test.sh                 (menu)
+#         bash vasp_nupdown_test.sh -m test -y -d "v_S*"
+#         bash vasp_nupdown_test.sh -m summary
+#
+# Options (all optional; the menu / questions are used for anything not given):
+#   -m test|summary|1|2   operation mode
+#   -d PATTERN            defect folders (DEFECT_PATH, default "v_O*")
+#   -s SCRIPT             submission script (default vasp_runscript)
+#   -c CMD                submit command (default: from the script header, qsub/sbatch)
+#   -o FILE               summary file (default summary.csv)
+#   -y / -n               submit / do not submit after the NUPDOWN setup
 #
 # Functions:
 #   [1] NUPDOWN Test:
@@ -27,10 +37,31 @@
 # ============================
 # Configurable Variables
 # ============================
-SUBMISSION_SCRIPT="vasp_runscript"
-SUBMISSION_CMD="sbatch"
-DEFECT_PATH="v_O*"
-SUMMARY_LOG="summary.csv"
+SUBMISSION_SCRIPT="${SUBMISSION_SCRIPT:-vasp_runscript}"
+SUBMISSION_CMD="${SUBMISSION_CMD:-}"   # empty: sbatch/qsub from the runscript header
+DEFECT_PATH="${DEFECT_PATH:-v_O*}"     # override: -d "v_S*" (or DEFECT_PATH="v_S*")
+SUMMARY_LOG="${SUMMARY_LOG:-summary.csv}"
+choice=""
+perform_submit=""
+
+while getopts ":m:d:s:c:o:ynh" opt; do
+    case $opt in
+        m) case "$OPTARG" in 1|test) choice=1 ;; 2|summary) choice=2 ;; *) echo "❌ -m must be test or summary"; exit 1 ;; esac ;;
+        d) DEFECT_PATH="$OPTARG" ;;
+        s) SUBMISSION_SCRIPT="$OPTARG" ;;
+        c) SUBMISSION_CMD="$OPTARG" ;;
+        o) SUMMARY_LOG="$OPTARG" ;;
+        y) perform_submit=y ;;
+        n) perform_submit=n ;;
+        h) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "❌ Unknown option (use -h)"; exit 1 ;;
+    esac
+done
+
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
 root_dir=$PWD
 
@@ -38,16 +69,17 @@ root_dir=$PWD
 # Check environment and files
 # ============================
 
-# Check sbatch command
-if ! command -v "$SUBMISSION_CMD" &> /dev/null; then
-    echo "❌ ERROR: $SUBMISSION_CMD command not found. Please load your scheduler module or check PATH."
-    exit 1
-fi
-
 # Check submission script exists
 if [[ ! -f "$SUBMISSION_SCRIPT" ]]; then
     echo "❌ ERROR: Submission script '$SUBMISSION_SCRIPT' not found in current directory."
     echo "Please make sure it exists here: $root_dir"
+    exit 1
+fi
+
+# Check submit command (PBS or Slurm)
+[[ -z "$SUBMISSION_CMD" ]] && SUBMISSION_CMD=$(submit_cmd_of "$SUBMISSION_SCRIPT")
+if ! command -v "$SUBMISSION_CMD" &> /dev/null; then
+    echo "❌ ERROR: $SUBMISSION_CMD command not found. Please load your scheduler module or check PATH."
     exit 1
 fi
 
@@ -62,12 +94,14 @@ fi
 # ============================
 # Menu for function selection
 # ============================
-echo "Select operation mode:"
-echo "1) NUPDOWN test"
-echo "2) Postprocess summary"
-read -p "Enter choice (1/2): " choice
+if [[ -z "$choice" ]]; then
+    echo "Select operation mode:"
+    echo "1) NUPDOWN test"
+    echo "2) Postprocess summary"
+    read -p "Enter choice (1/2): " choice
+fi
 
-if [[ "$choice" == "1" ]]; then
+if [[ "$choice" == "1" && -z "$perform_submit" ]]; then
     read -p "Do you want to submit jobs after NUPDOWN setup? (y/n): " perform_submit
 fi
 
@@ -81,7 +115,7 @@ if [[ "$choice" == "1" ]]; then
         cp "$SUBMISSION_SCRIPT" "$defect_dir"
         cd "$defect_dir" || continue
 
-        nupdown=$(grep -i '^NUPDOWN' INCAR | awk -F'=' '{print $2}' | awk '{print $1}')
+        nupdown=$(incar_get NUPDOWN | awk '{print $1}')
         if [[ -z "$nupdown" ]]; then
             echo "❌ ERROR: NUPDOWN missing in $defect_dir/INCAR."
             cd "$root_dir"
@@ -98,13 +132,13 @@ if [[ "$choice" == "1" ]]; then
             cp INCAR POSCAR POTCAR KPOINTS "$SUBMISSION_SCRIPT" "$new_dir"
         done
 
-        sed -i "s/^NUPDOWN *= *.*/NUPDOWN = $nupdown/" "$dir_nupdown/INCAR"
-        sed -i "s/^NUPDOWN *= *.*/NUPDOWN = $nupdown_plus2/" "$dir_nupdown_plus2/INCAR"
-        sed -i "s/^NUPDOWN/#NUPDOWN/" "$dir_no_nupdown/INCAR"
+        incar_set NUPDOWN "$nupdown" "$dir_nupdown/INCAR"
+        incar_set NUPDOWN "$nupdown_plus2" "$dir_nupdown_plus2/INCAR"
+        incar_comment NUPDOWN "$dir_no_nupdown/INCAR"
 
         if [[ "$perform_submit" == "y" ]]; then
             for submit_dir in "$dir_nupdown" "$dir_nupdown_plus2" "$dir_no_nupdown"; do
-                cd "$submit_dir" && $SUBMISSION_CMD "$SUBMISSION_SCRIPT" && cd ..
+                (cd "$submit_dir" && $SUBMISSION_CMD "$SUBMISSION_SCRIPT")
             done
         fi
         cd "$root_dir"
@@ -134,8 +168,8 @@ if [[ "$choice" == "2" ]]; then
             oszicar_path="${dir}OSZICAR"
 
             [[ ! -s "$outcar_path" ]] && { echo "[MISSING] $defect_dir/$dir OUTCAR"; continue; }
-            grep -q "reached required accuracy" "$outcar_path" || { echo "[INCOMPLETE] $defect_dir/$dir"; continue; }
-            grep -q "Total CPU time used" "$outcar_path" || { echo "[INCOMPLETE] $defect_dir/$dir"; continue; }
+            # converged by the same rules as VASP_JOB_PARAMETERS (relaxation or static run)
+            vasp_job_status -f "$dir" >/dev/null || { echo "[INCOMPLETE] $defect_dir/$dir"; continue; }
             [[ ! -f "$oszicar_path" ]] && { echo "[MISSING OSZICAR] $defect_dir/$dir"; continue; }
 
             min_e0_line=$(grep "E0=" "$oszicar_path" | tail -1)

@@ -1,0 +1,210 @@
+#!/bin/bash
+# VASP_JOB_PARAMETERS - end-of-job hook, sourced by VASP job scripts (PBS or Slurm).
+# Job scripts source VASP_JOB_PARAMETERS_gadi / VASP_JOB_PARAMETERS_slurm, which set
+# VJP_SITE and source this file. Needs JOBNAME to be set before sourcing.
+#
+# At source time: backs up INCAR/POSCAR as ${JOBNAME}_INCAR/_POSCAR.
+# At exit (trap): copies outputs to ${JOBNAME}_*, CONTCAR -> POSCAR, deletes CHG/REPORT,
+# checks convergence (vasp_job_status, see vasp_common.sh), writes ~/vasp_job_log
+# (~/vasp_fail_log on failure; the job then exits 1), and for finished jobs runs
+# Bader (if AECCAR2), band gap / DOS via vaspkit (static runs only) and, on Gadi,
+# VASP_AUTO_SUBMISSION.
+#
+# Site differences (VJP_SITE):
+#   gadi  : always back up / copy outputs; run band_vaspkit.py; VASP_AUTO_SUBMISSION;
+#           CHECK_AUTO_STOP / AUTO_STOP available
+#   slurm : skip backup / copying of outputs when IBRION = -1
+
+REMOVE_RENAME_FILES="CHG REPORT" # vaspout.h5
+COPY_RENAME_FILES="CONTCAR OSZICAR OUTCAR XDATCAR EIGENVAL"
+BACKUP_INPUT_FILES="INCAR POSCAR"
+
+# Directory of this file (it is sourced from job scripts, so $0 is not this file)
+VASP_JOB_PARAMETERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd)"
+SUBMIT_DIR="${PBS_O_WORKDIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
+VJP_SITE="${VJP_SITE:-$([ -n "${PBS_O_WORKDIR:-}" ] && echo gadi || echo slurm)}"
+
+# Shared helpers (find_tool, incar_get, vasp_job_status): next to this file, else on PATH.
+# This file is sourced by job scripts: never 'exit' here, only 'return'.
+_vjp_lib="$VASP_JOB_PARAMETERS_DIR/vasp_common.sh"
+[ -f "$_vjp_lib" ] || _vjp_lib=$(command -v vasp_common.sh 2>/dev/null)
+if [ -z "$_vjp_lib" ]; then
+    echo "VASP_JOB_PARAMETERS: vasp_common.sh not found next to $VASP_JOB_PARAMETERS_DIR or on PATH; end-of-job hook disabled" >&2
+    return 1
+fi
+source "$_vjp_lib"
+
+# Site tools: old absolute paths first, then next to this file, then PATH
+CHGSUM_CANDIDATES="/home/561/hm1876/vtstscripts/chgsum.pl /software/projects/pawsey0328/hma/scripts/vtstscripts-1035/chgsum.pl"
+BADER_CANDIDATES="/home/561/hm1876/.local/bin/bader /software/projects/pawsey0328/hma/scripts/vasp-scripts/bader"
+
+job_auto_submission () {
+	FUNCTION_CHOSEN=`grep "\.T\." VASP_AUTO_SUBMISSION |  awk -F '=|#' '{print $2}'`
+		FUNCTION_CHOSEN_NO_SPACE=`echo $FUNCTION_CHOSEN`
+	if [ "$FUNCTION_CHOSEN" ] ; then
+		local auto_script=$(find_tool /home/561/hm1876/vasp_scripts_self_created/${FUNCTION_CHOSEN_NO_SPACE}.sh)
+		if [ -n "$auto_script" ] ; then
+			sh "$auto_script" 1> /dev/null
+		else
+			echo "${FUNCTION_CHOSEN_NO_SPACE}.sh not found, vasp_auto_submission skipped"
+		fi
+		sed -i 's/\.T\./\.F\./' VASP_AUTO_SUBMISSION
+	else
+		echo "No vasp_auto_submission chosen"
+	fi
+}
+
+bader_cal (){
+	local chgsum=$(find_tool $CHGSUM_CANDIDATES)
+	local bader=$(find_tool $BADER_CANDIDATES)
+	if [ -z "$chgsum" ] || [ -z "$bader" ] ; then
+		echo "chgsum.pl or bader not found, Bader analysis skipped"
+		return
+	fi
+	"$chgsum"  AECCAR0 AECCAR2
+	"$bader" CHGCAR -ref CHGCAR_sum
+	rm -rf "$SUBMIT_DIR"/AECCAR* "$SUBMIT_DIR"/CHGCAR_sum
+}
+
+log_report (){
+	local status="${1:-SUCCESS}"   # 默认成功，失败时传入 "FAILED"
+	echo -e "\n------------------------------------------------------" >> ~/vasp_job_log
+	echo -e "Job finished at \c" >> ~/vasp_job_log && date >> ~/vasp_job_log
+	echo -e "PATH: ${SUBMIT_DIR}" >> ~/vasp_job_log
+	echo -e "STATUS: ${status}" >> ~/vasp_job_log
+	echo -e "------------------------------------------------------" >> ~/vasp_job_log
+}
+
+backup_input_files () {
+	for ii in $BACKUP_INPUT_FILES ; do
+		cp $ii ${JOBNAME}_${ii}
+	done
+}
+
+rename_files () {
+	for ii in $COPY_RENAME_FILES ; do
+		cp $ii ${JOBNAME}_${ii}
+	done
+	if [ -s CONTCAR ] ; then
+		cp CONTCAR POSCAR
+	fi
+}
+
+remove_files (){
+	for ii in $REMOVE_RENAME_FILES ; do
+		if [ "$ii" = "REPORT" ] && keep_report ; then
+			continue
+		fi
+		rm -f $ii
+	done
+}
+
+print_band_gap (){
+	echo 911 | vaspkit > band_gap
+	echo -e "211\n" | vaspkit
+	if [ "$VJP_SITE" = gadi ] ; then
+		local band_py=$(find_tool /home/561/hm1876/.local/bin/band_vaspkit.py)
+		if [ -n "$band_py" ] ; then
+			python3 "$band_py"
+		fi
+	fi
+}
+
+print_dos (){
+	echo -e "111\n1" | vaspkit > TDOS_log
+	echo -e "113\nall\n1" | vaspkit > PDOS_log
+	echo -e "116" | vaspkit > LDOS_log
+}
+
+# Gadi extras, not started automatically (call "CHECK_AUTO_STOP &" from a job script):
+# wait for an AUTOSTOP file holding a sleep time, then drop a STOPCAR
+CHECK_AUTO_STOP (){
+	cd "$SUBMIT_DIR"
+	COUNTER=0
+	COUNTER_MAX=288
+	while [ $COUNTER -le $COUNTER_MAX ]; do
+		if [ -a AUTOSTOP ] ; then
+			AUTO_STOP &
+			exit
+		else
+			sleep 600s
+			(( COUNTER++ ))
+		fi
+	done
+}
+
+AUTO_STOP (){
+	cd "$SUBMIT_DIR"
+	SLEEP_TIME=`cat AUTOSTOP`
+	sleep $SLEEP_TIME
+	cp "$(find_tool /home/561/hm1876/STOPCAR)" "$SUBMIT_DIR"
+	rm AUTOSTOP
+}
+
+# First value token of an INCAR tag in ./INCAR (case-insensitive, ';' and #/! comments handled)
+get_incar_tag() {
+	incar_get "$1" INCAR 2>/dev/null | awk '{print $1}'
+}
+
+# NSW missing or <= 0: static (single-point) run
+is_static_run() {
+	local nsw="$(get_incar_tag NSW || true)"
+	[[ -z "$nsw" ]] && return 0
+	[[ "$nsw" =~ ^-?[0-9]+$ ]] || return 1
+	(( nsw <= 0 ))
+}
+
+# REPORT holds MD / constrained-MD (blue-moon, slow-growth) / ML force-field data
+keep_report() {
+	local mdalgo="$(get_incar_tag MDALGO || true)"
+	local lmlff="$(get_incar_tag ML_LMLFF || true)"
+	local mlmode="$(get_incar_tag ML_MODE || true)"
+	[[ -n "$mdalgo" && "$mdalgo" != "0" ]] && return 0
+	[[ -f ICONST ]] && return 0
+	[[ "$lmlff" =~ ^\.?[Tt] ]] && return 0
+	[[ -n "$mlmode" ]] && return 0
+	return 1
+}
+
+# Convergence check (table in vasp_common.sh: vasp_job_status)
+check_completion() {
+	local status
+	status=$(vasp_job_status -f "$PWD")
+	if [[ "$status" == converged* ]]; then
+		return 0
+	fi
+	echo "$(date): Job failed - ${status#*$'\t'} in $PWD" >> ~/vasp_fail_log
+	return 1
+}
+
+# IBRION = -1 on the Slurm site: inputs/outputs are not backed up
+skip_backup() {
+	[ "$VJP_SITE" != gadi ] && [ "$(get_incar_tag IBRION)" = "-1" ]
+}
+
+final_act (){
+	# Back up outputs once for every job type
+	skip_backup || rename_files
+	remove_files
+	if check_completion; then
+		log_report "SUCCESS"
+	else
+		log_report "FAILED"
+		exit 1
+	fi
+	if [ -e AECCAR2 ] ; then
+		bader_cal
+	fi
+	# band gap / DOS post-processing only for static runs (not relaxations or MD)
+	if is_static_run ; then
+		print_band_gap
+		print_dos
+	fi
+	if [ "$VJP_SITE" = gadi ] && [ -e VASP_AUTO_SUBMISSION ] ; then
+		job_auto_submission
+	fi
+	exit
+}
+
+skip_backup || backup_input_files
+trap 'final_act' EXIT
