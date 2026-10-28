@@ -93,9 +93,19 @@ fatband_analysis.py — 通用 fatband 批量绘图脚本 (pyprocar 6.x)
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 import os
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import read_poscar  # noqa: E402
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -127,14 +137,12 @@ def reset_pyprocar_cache(dirname: Path):
 
 
 def parse_poscar_species(poscar: Path):
-    """返回 {元素: [原子索引(0-based)]}，按 POSCAR 顺序。"""
-    lines = poscar.read_text().splitlines()
-    symbols = lines[5].split()
-    if any(s.isdigit() for s in symbols):
+    """返回 {元素: [原子索引(0-based)]}，按 POSCAR 顺序（VASP 6.4 的 Ti_pv/<hash> → Ti）。"""
+    p = read_poscar(str(poscar))
+    if p.species is None:
         sys.exit("POSCAR 第 6 行不是元素名（VASP4 格式？）。请用 VASP5+ 格式的 POSCAR。")
-    counts = [int(x) for x in lines[6].split()]
     species, i = {}, 0
-    for sym, n in zip(symbols, counts):
+    for sym, n in zip(p.species, p.counts):
         species.setdefault(sym, []).extend(range(i, i + n))
         i += n
     return species

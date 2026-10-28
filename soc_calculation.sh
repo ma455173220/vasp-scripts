@@ -3,25 +3,14 @@
 
 NEW_DIRECTORY="SOC"
 FILES_REMOVED=""
-# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
-    source "$_LIB_DIR/vasp_incar_lib.sh"
-elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
-    source "$(command -v vasp_incar_lib.sh)"
-else
-    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
-    exit 1
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
-# Submission script(s): files whose first 4 KB contain #PBS / #SBATCH (big outputs are not read)
-SUBMISSION_SCRIPT=""
-for f in *; do
-    [ -f "$f" ] || continue
-    case "$f" in CHGCAR|CHG|WAVECAR|vasprun.xml|vaspout.h5|PROCAR|POTCAR|DOSCAR|OUTCAR|*_OUTCAR|XDATCAR|AECCAR*|LOCPOT|ELFCAR) continue ;; esac
-    runscript_scheduler "$f" >/dev/null && SUBMISSION_SCRIPT="${SUBMISSION_SCRIPT:+$SUBMISSION_SCRIPT }$f"
-done
-[ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found in $PWD"
+# Submission script: header-limited scan (first 4 KB), asks if there are several ($RUNSCRIPT overrides)
+SUBMISSION_SCRIPT=$(find_runscript)
+[ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found (or none selected) in $PWD"
 FILES_NEEDED="INCAR CONTCAR POTCAR KPOINTS $SUBMISSION_SCRIPT"
 LN_FILES_NEEDED="CHGCAR"
 echo $FILES_NEEDED $LN_FILES_NEEDED
@@ -77,39 +66,15 @@ else
 fi
 
 check_d_f_elements (){
-
-	# Check if the POSCAR file exists
 	if [ -f "POSCAR" ]; then
-	    # Extract all element symbols from the POSCAR file
-	    elements=$(poscar_species POSCAR)   # Ti_pv/<hash> -> Ti
-	
-	    # Define lists of d-block and f-block elements
-        # Group 3-12 elements
-        d_elements=("Sc" "Ti" "V" "Cr" "Mn" "Fe" "Co" "Ni" "Cu" "Zn" "Y" "Zr" "Nb" "Mo" "Tc" "Ru" "Rh" "Pd" "Ag" "Cd" "Hf" "Ta" "W" "Re" "Os" "Ir" "Pt" "Au" "Hg")
-        
-        # Lanthanides
-        lanthanides=("La" "Ce" "Pr" "Nd" "Pm" "Sm" "Eu" "Gd" "Tb" "Dy" "Ho" "Er" "Tm" "Yb" "Lu")
-        
-        # Actinides
-        actinides=("Ac" "Th" "Pa" "U" "Np" "Pu" "Am" "Cm" "Bk" "Cf" "Es" "Fm" "Md" "No" "Lr")
-        
-        # Combine all transition elements
-        transition_elements=("${d_elements[@]}" "${lanthanides[@]}" "${actinides[@]}")
-        
-	    # Check if the elements contain any d-block or f-block elements
-	    for element in "${transition_elements[@]}"; do
-	        if [[ " $(echo $elements) " == *" $element "* ]]; then
-	            # Run echo, or replace with any other command you want to execute
+	    if [ -n "$(poscar_df_elements POSCAR)" ]; then
                 echo -e "\033[33mThe POSCAR contains d or f block elements, modify LMAXMIX accordingly.\033[0m"
-	            exit
-	        fi
-	    done
-	
+	        exit
+	    fi
 	    echo "POSCAR does not contain d-block or f-block elements"
 	else
 	    echo "POSCAR file does not exist"
 	fi
-
 }
 
 file_editor (){

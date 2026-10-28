@@ -2,9 +2,19 @@
 
 import subprocess
 import os
+import shutil
 import sys
 import math
 import re
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import read_poscar  # noqa: E402
 
 from optparse import OptionParser
 
@@ -70,24 +80,18 @@ if outcar != None:
     average = 0.0
     maxforce = 0.0
 
+    # Selective dynamics in ./POSCAR: atoms with "F F F" are frozen (1-based indices)
     try:
-        poscar = open("POSCAR", 'r')
-    except OSError:
+        poscar = read_poscar("POSCAR")
+    except (OSError, ValueError, IndexError):
         poscar = None
 
-    if poscar != None:
-        check_poscar = subprocess.getoutput('grep -in "Selective dynamics" POSCAR')
-        if len(check_poscar) != 0:
-            line_number_selective_dynamics = int(check_poscar.split(":")[0])
-            pos = poscar.readlines()
-            for i, value in enumerate(pos):
-                if i >= line_number_selective_dynamics + 1 and i < line_number_selective_dynamics + 1 + natoms:
-                    if value.split()[3] == "F" and value.split()[4] == "F" and value.split()[5] == "F":
-                        atom_index = int(i - line_number_selective_dynamics)
-                        atoms_freeze.append(atom_index)
-                    else:
-                        atom_index = int(i - line_number_selective_dynamics)
-                        atoms_relax.append(atom_index)
+    if poscar is not None and poscar.selective is not None:
+        for k, flags in enumerate(poscar.selective[:natoms]):
+            if flags.any():
+                atoms_relax.append(k + 1)
+            else:
+                atoms_freeze.append(k + 1)
 
     i = 0
     for line in outcarlines:

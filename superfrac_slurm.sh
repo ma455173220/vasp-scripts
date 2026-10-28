@@ -1,4 +1,39 @@
 #!/bin/bash
+# Disordered-structure pipeline: supercell -> CIF to VASP -> submit -> energies (PBS or Slurm).
+#
+# Usage: superfrac_slurm.sh                         (menu)
+#        superfrac_slurm.sh [options] ACTION...     (no menu; asks only for missing values)
+#   ACTION: 1|generate  2|convert  3|submit  4|extract   (run in the order given)
+#   -p PREFIX     material prefix (e.g. BSTO)
+#   -i CIF        input CIF for "generate"
+#   -s SIZE       supercell size for "generate" (e.g. 2x3x2)
+#   -d DIR        folder for the CIF / *.vasp files (default: geo)
+#   -r SCRIPT     job script copied into each structure folder (default: vasp_runscript)
+# Example: superfrac_slurm.sh -p BSTO -i BSTO.cif -s 2x2x2 generate convert submit
+
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
+
+prefix=""
+cif_file=""
+supercell_size=""
+work_dir=""
+runscript="vasp_runscript"
+while getopts ":p:i:s:d:r:h" opt; do
+    case $opt in
+        p) prefix="$OPTARG" ;;
+        i) cif_file="$OPTARG" ;;
+        s) supercell_size="$OPTARG" ;;
+        d) work_dir="$OPTARG" ;;
+        r) runscript="$OPTARG" ;;
+        h) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
+        *) echo "Unknown option (use -h)"; exit 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+ACTIONS=("$@")
 
 #############################################
 # Function: Dependency check
@@ -15,32 +50,19 @@ check_dependencies() {
     echo "✅ All dependencies OK."
 }
 
-# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
-# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
-detect_submit_cmd() {
-    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
-        echo "sbatch"
-    elif grep -q "^#PBS" "$1" 2>/dev/null; then
-        echo "qsub"
-    elif command -v sbatch >/dev/null 2>&1; then
-        echo "sbatch"
-    else
-        echo "qsub"
-    fi
-}
-
 #############################################
 # Ask prefix once at start
 #############################################
-read -p "Enter material prefix (e.g., BSTO, MgO, ZrS2): " prefix
+[ -n "$prefix" ] || read -p "Enter material prefix (e.g., BSTO, MgO, ZrS2): " prefix
 
 #############################################
 # Function: Generate supercells
 #############################################
 generate_supercells() {
-    read -p "Enter input CIF file name (e.g., ${prefix}.cif): " cif_file
-    read -p "Enter supercell size (e.g., 2x3x2): " supercell_size
-    read -p "Enter output folder (default: geo): " out_dir
+    [ -n "$cif_file" ] || read -p "Enter input CIF file name (e.g., ${prefix}.cif): " cif_file
+    [ -n "$supercell_size" ] || read -p "Enter supercell size (e.g., 2x3x2): " supercell_size
+    local out_dir="$work_dir"
+    [ -n "$out_dir" ] || [ ${#ACTIONS[@]} -gt 0 ] || read -p "Enter output folder (default: geo): " out_dir
     out_dir=${out_dir:-geo}
 
     mkdir -p "$out_dir"
@@ -53,7 +75,8 @@ generate_supercells() {
 # Function: Convert CIF to VASP
 #############################################
 convert_cif_to_vasp() {
-    read -p "Enter folder containing CIF files (default: geo): " cif_dir
+    local cif_dir="$work_dir"
+    [ -n "$cif_dir" ] || [ ${#ACTIONS[@]} -gt 0 ] || read -p "Enter folder containing CIF files (default: geo): " cif_dir
     cif_dir=${cif_dir:-geo}
     cd "$cif_dir" || { echo "❌ Cannot enter folder: $cif_dir"; return 1; }
 
@@ -62,8 +85,12 @@ convert_cif_to_vasp() {
         [ -e "$cif" ] || continue
         base=${cif%.cif}
         echo -e "1\n175\n113 $cif\n" | atomkit > /dev/null
-        rm $cif
-        echo "Converted $cif -> ${base}.vasp"
+        if [ -s "${base}.vasp" ]; then
+            rm "$cif"
+            echo "Converted $cif -> ${base}.vasp"
+        else
+            echo "⚠️ ${base}.vasp not written by atomkit; $cif kept"
+        fi
     done
     cd - > /dev/null
     echo "✅ Conversion completed."
@@ -73,10 +100,11 @@ convert_cif_to_vasp() {
 # Function: Submit VASP jobs
 #############################################
 submit_vasp_jobs() {
-    read -p "Enter folder containing *.vasp files (default: geo): " vasp_dir
+    local vasp_dir="$work_dir"
+    [ -n "$vasp_dir" ] || [ ${#ACTIONS[@]} -gt 0 ] || read -p "Enter folder containing *.vasp files (default: geo): " vasp_dir
     vasp_dir=${vasp_dir:-geo}
 
-    local sub_cmd=$(detect_submit_cmd vasp_runscript)
+    local sub_cmd=$(submit_cmd_of "$runscript")
     if ! command -v "$sub_cmd" &> /dev/null; then
         echo "❌ $sub_cmd not found; load the scheduler module first."
         return 1
@@ -88,9 +116,9 @@ submit_vasp_jobs() {
 
         mkdir -p "$name"
         cp "$vaspfile" "$name/POSCAR"
-        cp INCAR POTCAR KPOINTS vasp_runscript "$name/"
+        cp INCAR POTCAR KPOINTS "$runscript" "$name/"
         cd "$name" || exit
-        $sub_cmd vasp_runscript
+        $sub_cmd "$runscript"
         cd ..
     done
     echo "✅ VASP jobs submitted."
@@ -106,11 +134,10 @@ extract_energies() {
     echo ">>> Extracting energies..."
     for dir in ${prefix}_*; do
         if [ -d "$dir" ]; then
-            outcar="$dir/OUTCAR"
             oszicar="$dir/OSZICAR"
 
-            if grep -q "reached required accuracy" "$outcar" 2>/dev/null && \
-               grep -q "Total CPU time used" "$outcar" 2>/dev/null; then
+            # converged by the same rules as VASP_JOB_PARAMETERS (vasp_common.sh)
+            if vasp_job_status -f "$dir" > /dev/null; then
 
                 energy=$(grep "E0=" "$oszicar" | tail -1 | awk '{print $5}')
                 if [ -n "$energy" ]; then
@@ -126,6 +153,29 @@ extract_energies() {
     done
     echo "Results written to $output_file"
 }
+
+run_action() {
+    case $1 in
+        1|generate) generate_supercells ;;
+        2|convert) convert_cif_to_vasp ;;
+        3|submit) submit_vasp_jobs ;;
+        4|extract) extract_energies ;;
+        *) echo "Invalid choice: $1"; return 1 ;;
+    esac
+}
+
+#############################################
+# Actions from the command line: no menu
+#############################################
+if [ ${#ACTIONS[@]} -gt 0 ]; then
+    for a in "${ACTIONS[@]}"; do
+        case $a in 1|generate|2|convert) check_dependencies; break ;; esac
+    done
+    for a in "${ACTIONS[@]}"; do
+        run_action "$a" || exit 1
+    done
+    exit 0
+fi
 
 #############################################
 # Main Menu
@@ -145,10 +195,7 @@ while true; do
     read -p "Choose an option: " choice
 
     case $choice in
-        1) generate_supercells ;;
-        2) convert_cif_to_vasp ;;
-        3) submit_vasp_jobs ;;
-        4) extract_energies ;;
+        1|2|3|4) run_action "$choice" ;;
         5) echo "Exiting..."; break ;;
         *) echo "Invalid choice." ;;
     esac

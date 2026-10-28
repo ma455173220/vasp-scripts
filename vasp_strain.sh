@@ -36,36 +36,20 @@ then
 	exit 1
 fi
 
-# Locate deform_strain.sh: old install path, else this script's directory, else PATH
-deform_strain="/home/561/hm1876/.local/bin/deform_strain.sh"
-if [ ! -f "$deform_strain" ]; then
-	script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-	if [ -f "$script_dir/deform_strain.sh" ]; then
-		deform_strain="$script_dir/deform_strain.sh"
-	else
-		deform_strain=$(command -v deform_strain.sh)
-	fi
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
+
+# Locate deform_strain.sh: old install path, else next to vasp_common.sh (this repo), else PATH
+deform_strain=$(find_tool /home/561/hm1876/.local/bin/deform_strain.sh)
 if [ -z "$deform_strain" ]
 then
 	echo -e "${ORANGE}Error: deform_strain.sh not found (install path, script directory or PATH)"
 	exit 1
 fi
 
-# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
-# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
-detect_submit_cmd() {
-    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
-        echo "sbatch"
-    elif grep -q "^#PBS" "$1" 2>/dev/null; then
-        echo "qsub"
-    elif command -v sbatch >/dev/null 2>&1; then
-        echo "sbatch"
-    else
-        echo "qsub"
-    fi
-}
-SUB_CMD=$(detect_submit_cmd "$runscript")
+SUB_CMD=$(submit_cmd_of "$runscript")
 
 # Choose the shear strain direction
 read -p "Please select the strain direction (XX, YY, ZZ, XY, XZ, YZ): " shear_strain_direction

@@ -64,23 +64,14 @@ reverse_charge() {
     fi
 }
 
-# Submit command from the job script header (#SBATCH -> sbatch, #PBS -> qsub),
-# else the scheduler found on PATH (same rule as stm-calculations.sh / doped_workflow.sh)
-detect_submit_cmd() {
-    if grep -q "^#SBATCH" "$1" 2>/dev/null; then
-        echo "sbatch"
-    elif grep -q "^#PBS" "$1" 2>/dev/null; then
-        echo "qsub"
-    elif command -v sbatch >/dev/null 2>&1; then
-        echo "sbatch"
-    else
-        echo "qsub"
-    fi
-}
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
 if [ -z "$COMMAND" ]; then
     job_src=$(resolve_file "$SXDEFECT_JOB" "$SXDEFECT_JOB")
-    if [ "$(detect_submit_cmd "$job_src")" = "sbatch" ]; then
+    if [ "$(submit_cmd_of "$job_src")" = "sbatch" ]; then
         COMMAND="sbatch --qos=high $SXDEFECT_JOB"
     else
         COMMAND="qsub $SXDEFECT_JOB"

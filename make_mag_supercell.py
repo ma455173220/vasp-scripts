@@ -30,10 +30,21 @@ make_mag_supercell.py
 """
 
 import argparse
+import os
+import shutil
 import sys
 import numpy as np
-from ase.io import read, write
+from ase.io import write
 from ase.build import make_supercell
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import group_order, read_atoms  # noqa: E402
 
 
 # ══════════════════════════════════════════════
@@ -161,13 +172,8 @@ def format_magmom_vasp(magmom_arr, atoms):
 
 def sort_atoms(atoms, magmom=None):
     """按元素排序，保持 POSCAR 同种元素连续，同步重排 MAGMOM。"""
-    syms  = atoms.get_chemical_symbols()
     # 保持原胞中元素出现的先后顺序
-    seen, order = [], []
-    for s in syms:
-        if s not in seen:
-            seen.append(s)
-    idx_sorted = sorted(range(len(syms)), key=lambda i: seen.index(syms[i]))
+    idx_sorted = group_order(atoms.get_chemical_symbols())
     sorted_atoms = atoms[idx_sorted]
     sorted_magmom = magmom[idx_sorted] if magmom is not None else None
     return sorted_atoms, sorted_magmom
@@ -197,7 +203,7 @@ def main():
 
     # ── 读取结构 ──
     try:
-        prim = read(args.file)
+        prim = read_atoms(args.file)   # 旧版 ASE 读不了 VASP 6.4 物种名时用 vasp_common 解析
     except Exception as e:
         print(f"[错误] 读取结构失败：{e}", file=sys.stderr)
         sys.exit(1)

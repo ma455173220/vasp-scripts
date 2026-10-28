@@ -185,15 +185,11 @@ run_workflow_generator() {
     # Create input for the workflow generator
     local workflow_prefix="${user_prefix}_${strain_name}"
     
-    # Run the workflow generator with automatic inputs
-    # (reproduces the old "y = gamma-only pre-opt" answer: generate/run steps
-    #  0 1 2 with job numbers from 00, dipole correction off)
-    {
-        echo "$workflow_prefix"  # Enter prefix
-        echo "0"                 # Job number offset
-        echo "0 1 2"             # Steps: gamma-only pre-opt, step1, step2
-        echo "n"                 # No dipole correction
-    } | bash ./vasp_workflow_input_generator_setonix.sh > workflow_generator.log 2>&1
+    # Run the workflow generator non-interactively: generate/run steps 0 1 2
+    # (gamma-only pre-opt, step1, step2) with job numbers from 00, no dipole correction.
+    # The copied wrapper finds vasp_workflow_input_generator.sh on PATH.
+    bash ./vasp_workflow_input_generator_setonix.sh --prefix "$workflow_prefix" --offset 0 \
+        --steps "0 1 2" --dipole n --yes < /dev/null > workflow_generator.log 2>&1
     
     # Check if workflow script was generated
     local workflow_script="${workflow_prefix}.sh"

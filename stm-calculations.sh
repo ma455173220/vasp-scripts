@@ -1,23 +1,31 @@
 #!/bin/bash
+# Usage: stm-calculations.sh [-y|--submit | -n|--no-submit] <submission_script> <band_index>...
+#   -y / -n answer the "submit the jobs?" question (asked when neither is given)
+
+# Options may appear anywhere; everything else is positional
+SUBMIT_CHOICE=""
+args=()
+for a in "$@"; do
+    case "$a" in
+        -y|--submit) SUBMIT_CHOICE=1 ;;
+        -n|--no-submit) SUBMIT_CHOICE=2 ;;
+        *) args+=("$a") ;;
+    esac
+done
+set -- "${args[@]}"
 
 # Check if the number of arguments is at least 2
 if [ "$#" -lt 2 ]; then
     echo "Error: At least 2 arguments are required"
-    echo "Usage: stm-calculations.sh <submission_script> <band_index>"
+    echo "Usage: stm-calculations.sh [-y|-n] <submission_script> <band_index>"
     echo "<band_index> can be (1) single integer, (2) range of integers separated by a dash (e.g., 323-328), or (3) integer-spinup/spindw (323-328-spinup)"
     exit 1
 fi
 
-# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
-    source "$_LIB_DIR/vasp_incar_lib.sh"
-elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
-    source "$(command -v vasp_incar_lib.sh)"
-else
-    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
-    exit 1
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
 # Check if the first argument is a file in the current directory
 if [ ! -f "./$1" ]; then
@@ -121,19 +129,14 @@ for i in "${@:2}"; do
 done
 
 # Pick the submit command from the runscript header (PBS or Slurm)
-if grep -q "^#SBATCH" "$1"; then
-	SUB_CMD="sbatch"
-elif grep -q "^#PBS" "$1"; then
-	SUB_CMD=$(command -v qsub || echo /opt/pbs/default/bin/qsub)
-elif command -v sbatch >/dev/null 2>&1; then
-	SUB_CMD="sbatch"
-else
-	SUB_CMD="qsub"
-fi
+SUB_CMD=$(submit_cmd_of "$1")
+[ "$SUB_CMD" = qsub ] && SUB_CMD=$(command -v qsub || echo /opt/pbs/default/bin/qsub)
 
-echo -e "Do you want to submit the jobs?\n1 YES\n2 NO"
-read SUBMIT_CHOICE
-if [ $SUBMIT_CHOICE -eq '1' ] ; then
+if [ -z "$SUBMIT_CHOICE" ]; then
+	echo -e "Do you want to submit the jobs?\n1 YES\n2 NO"
+	read SUBMIT_CHOICE
+fi
+if [ "$SUBMIT_CHOICE" = '1' ] ; then
         for i in "${@:2}" ; do
 		folder="STM_${i}"
                 cd $folder

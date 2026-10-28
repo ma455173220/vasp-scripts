@@ -7,16 +7,10 @@
 
 set -euo pipefail
 
-# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
-    source "$_LIB_DIR/vasp_incar_lib.sh"
-elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
-    source "$(command -v vasp_incar_lib.sh)"
-else
-    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
-    exit 1
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 NEW_DIRECTORY="NON-SC-kmesh-0.03"
@@ -32,66 +26,14 @@ NC='\033[0m'
 SEP="---------------------------------------------------------"
 
 # ─── Locate job submission script (PBS or Slurm) ──────────────────────────────
-# Search before any cd; store candidates as absolute paths.
-SUBMISSION_SCRIPT=""
-SCHEDULER=""
-
-# Exclude known VASP binary/output files from the search
-EXCLUDE_NAMES=( CHGCAR WAVECAR vasprun.xml PROCAR POTCAR DOSCAR OUTCAR INCAR
-                CONTCAR POSCAR KPOINTS LOCPOT EIGENVAL IBZKPT OSZICAR )
-
-build_find_excludes() {
-    local args=()
-    for name in "${EXCLUDE_NAMES[@]}"; do
-        args+=(! -name "$name")
-    done
-    echo "${args[@]}"
-}
-
-# Collect ALL candidate scripts and their scheduler types
-declare -a CANDIDATE_SCRIPTS=()
-declare -a CANDIDATE_SCHEDULERS=()
-
-while IFS= read -r -d '' f; do
-    # only the first 4 KB of each file is read (runscript_scheduler)
-    sched=$(runscript_scheduler "$f" || true)
-    if [[ "$sched" == "PBS" ]]; then
-        CANDIDATE_SCRIPTS+=("$(realpath "$f")")
-        CANDIDATE_SCHEDULERS+=("PBS")
-    elif [[ "$sched" == "SLURM" ]]; then
-        CANDIDATE_SCRIPTS+=("$(realpath "$f")")
-        CANDIDATE_SCHEDULERS+=("Slurm")
-    fi
-done < <(find . -maxdepth 1 -type f $(build_find_excludes) -print0)
-
-case ${#CANDIDATE_SCRIPTS[@]} in
-    0)
-        echo -e "${RED}ERROR:${NC} No PBS (#PBS) or Slurm (#SBATCH) submission script found in the current directory."
-        exit 1
-        ;;
-    1)
-        # Unambiguous — use directly
-        SUBMISSION_SCRIPT="${CANDIDATE_SCRIPTS[0]}"
-        SCHEDULER="${CANDIDATE_SCHEDULERS[0]}"
-        ;;
-    *)
-        # Multiple candidates — prompt user to choose
-        echo -e "${YELLOW}Multiple submission scripts found:${NC}"
-        for i in "${!CANDIDATE_SCRIPTS[@]}"; do
-            printf "  [%d] %s  (%s)\n" "$((i+1))" "$(basename "${CANDIDATE_SCRIPTS[$i]}")" "${CANDIDATE_SCHEDULERS[$i]}"
-        done
-        while true; do
-            read -rp "Select script to use [1-${#CANDIDATE_SCRIPTS[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#CANDIDATE_SCRIPTS[@]} )); then
-                SUBMISSION_SCRIPT="${CANDIDATE_SCRIPTS[$((choice-1))]}"
-                SCHEDULER="${CANDIDATE_SCHEDULERS[$((choice-1))]}"
-                break
-            else
-                echo "  Invalid input. Please enter a number between 1 and ${#CANDIDATE_SCRIPTS[@]}."
-            fi
-        done
-        ;;
-esac
+# Header-limited scan (first 4 KB of each file); asks if there are several ($RUNSCRIPT overrides)
+SUBMISSION_SCRIPT=$(find_runscript || true)
+if [[ -z "$SUBMISSION_SCRIPT" ]]; then
+    echo -e "${RED}ERROR:${NC} No PBS (#PBS) or Slurm (#SBATCH) submission script found in the current directory."
+    exit 1
+fi
+SUBMISSION_SCRIPT="$(realpath "$SUBMISSION_SCRIPT")"
+[[ "$(sched_of "$SUBMISSION_SCRIPT")" == pbs ]] && SCHEDULER="PBS" || SCHEDULER="Slurm"
 
 echo "Submission script: $(basename "$SUBMISSION_SCRIPT")  (scheduler: $SCHEDULER)"
 
@@ -119,29 +61,12 @@ check_d_f_elements() {
         return
     fi
 
-    # Extract element symbols from line 6 (VASP5 format)
-    local elements
-    mapfile -t elements < <(poscar_species "$poscar")   # Ti_pv/<hash> -> Ti
-
-    # d-block (Groups 3–12, common subset — extend as needed)
-    local d_elements=(Sc Ti V Cr Mn Fe Co Ni Cu Zn
-                      Y Zr Nb Mo Tc Ru Rh Pd Ag Cd
-                      Hf Ta W Re Os Ir Pt Au Hg)
-    # Lanthanides
-    local lanthanides=(La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu)
-    # Actinides
-    local actinides=(Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr)
-
-    local transition_elements=("${d_elements[@]}" "${lanthanides[@]}" "${actinides[@]}")
-
-    for el in "${elements[@]}"; do
-        for trans in "${transition_elements[@]}"; do
-            if [[ "$el" == "$trans" ]]; then
-                echo -e "${YELLOW}WARNING:${NC} POSCAR contains d/f-block element '$el'. Modify LMAXMIX accordingly (e.g. LMAXMIX = 4 for d, 6 for f)."
-                return
-            fi
-        done
-    done
+    local el
+    el=$(poscar_df_elements "$poscar" | head -1)   # Ti_pv/<hash> -> Ti
+    if [[ -n "$el" ]]; then
+        echo -e "${YELLOW}WARNING:${NC} POSCAR contains d/f-block element '$el'. Modify LMAXMIX accordingly (e.g. LMAXMIX = 4 for d, 6 for f)."
+        return
+    fi
 
     echo "POSCAR does not contain d-block or f-block elements."
 }

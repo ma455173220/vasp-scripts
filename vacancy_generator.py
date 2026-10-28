@@ -25,7 +25,16 @@ from pathlib import Path
 
 import numpy as np
 import spglib
-from ase.io import read, write
+from ase.io import write
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import group_order, read_atoms  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -387,8 +396,9 @@ def write_structures(unique, nvac, element, outdir, sub_element=None, cfg=None):
             )
             print(f"  [微扰] {dirname.name}: 影响 {n_perturbed} 个原子")
 
-        # ── 写 POSCAR ──
+        # ── 写 POSCAR ──（同种元素连续：置换原子不再把一个物种拆成多段）
         poscar_out = dirname / "POSCAR"
+        final_atoms = final_atoms[group_order(final_atoms.get_chemical_symbols())]
         write(str(poscar_out), final_atoms, format="vasp", direct=True)
         print(f"  [写出] {i+1:>3}  {cand['label']:<42} → {dirname.name}/POSCAR")
 
@@ -472,7 +482,7 @@ def main():
 
     # ── 读取结构 ──
     try:
-        atoms = read(args.file)
+        atoms = read_atoms(args.file)   # falls back to vasp_common for "Ti_pv/<hash>" species
         if "momenta" in atoms.arrays:
             del atoms.arrays["momenta"]
     except Exception as e:

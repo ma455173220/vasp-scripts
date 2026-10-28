@@ -105,27 +105,11 @@ echo "  源 INCAR：$INCAR_FILE"
 [[ -n "$JOB_SCRIPT" ]] && echo "  提交脚本：$JOB_SCRIPT"
 echo "========================================"
 
-# INCAR 读写：vasp_incar_lib.sh（本脚本所在目录 → PATH）
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$_LIB_DIR/vasp_incar_lib.sh" ]]; then
-    source "$_LIB_DIR/vasp_incar_lib.sh"
-elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
-    source "$(command -v vasp_incar_lib.sh)"
-else
-    echo "  [错误] 找不到 vasp_incar_lib.sh（脚本目录或 PATH）"
-    exit 1
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
-# ---------- 检测调度系统 ----------
-detect_scheduler() {
-    if command -v qsub &>/dev/null; then
-        echo "pbs"
-    elif command -v sbatch &>/dev/null; then
-        echo "slurm"
-    else
-        echo "none"
-    fi
-}
 
 # ---------- 主循环 ----------
 GENERATED_DIRS=()
@@ -146,7 +130,7 @@ for val in "${VALUES[@]}"; do
         mkdir -p "$dir_name"
     fi
 
-    # ---------- 修改 INCAR（vasp_incar_lib.sh：整值替换、只取消注释一行、处理 ; 行）----------
+    # ---------- 修改 INCAR（vasp_common.sh：整值替换、只取消注释一行、处理 ; 行）----------
     target_incar="${dir_name}/INCAR"
     cp "$INCAR_FILE" "$target_incar"
 
@@ -210,15 +194,16 @@ done
 echo ""
 
 # 检测调度系统
-SCHEDULER=$(detect_scheduler)
+# 调度系统：按提交脚本头（#PBS / #SBATCH），否则看系统中的 sbatch / qsub
+SCHEDULER=$(sched_of "$JOB_SCRIPT" || true)
 case "$SCHEDULER" in
     pbs)   SUBMIT_CMD="qsub";   SCHED_NAME="PBS" ;;
     slurm) SUBMIT_CMD="sbatch"; SCHED_NAME="Slurm" ;;
-    none)
-        echo "  [警告] 未检测到 qsub 或 sbatch，无法提交任务"
-        exit 0
-        ;;
 esac
+if ! command -v "$SUBMIT_CMD" &>/dev/null; then
+    echo "  [警告] 未检测到 $SUBMIT_CMD，无法提交任务"
+    exit 0
+fi
 
 echo "  检测到调度系统：${SCHED_NAME}（${SUBMIT_CMD}）"
 echo ""

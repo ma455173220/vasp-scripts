@@ -22,12 +22,22 @@ Workflow
 """
 
 import argparse
+import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
 import numpy as np
-from ase.io import read
+
+_w = shutil.which("vasp_common.py")
+for _d in [os.path.dirname(os.path.realpath(__file__))] + ([os.path.dirname(os.path.realpath(_w))] if _w else []):
+    if os.path.isfile(os.path.join(_d, "vasp_common.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    sys.exit("ERROR: vasp_common.py not found (next to this script or on PATH)")
+from vasp_common import read_atoms  # noqa: E402
 
 
 # Real freq line:       '   1 f  =   50.270 THz ... 1676.836 cm-1 ...'
@@ -167,7 +177,7 @@ def main():
 
     # ---- read structure ----
     try:
-        atoms = read(args.poscar)
+        atoms = read_atoms(args.poscar)   # falls back to vasp_common for "Ti_pv/<hash>" species
     except Exception as e:
         sys.exit(f"Error reading '{args.poscar}': {e}")
     n_atoms = len(atoms)

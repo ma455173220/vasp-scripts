@@ -13,25 +13,14 @@ EOL
     exit 1
 }
 
-# Shared INCAR helpers (incar_get / incar_set / incar_comment): next to this script, else on PATH
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$_LIB_DIR/vasp_incar_lib.sh" ]; then
-    source "$_LIB_DIR/vasp_incar_lib.sh"
-elif command -v vasp_incar_lib.sh >/dev/null 2>&1; then
-    source "$(command -v vasp_incar_lib.sh)"
-else
-    echo -e "\033[31mERROR:\033[0m vasp_incar_lib.sh not found (next to this script or on PATH)"
-    exit 1
-fi
+# Shared helpers (vasp_common.sh): next to this script, else on PATH
+_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/vasp_common.sh"; [ -f "$_lib" ] || _lib=$(command -v vasp_common.sh || true)
+[ -n "$_lib" ] || { echo "ERROR: vasp_common.sh not found (next to this script or on PATH)" >&2; exit 1; }
+source "$_lib"
 
-# Submission script(s): files whose first 4 KB contain #PBS / #SBATCH (big outputs are not read)
-SUBMISSION_SCRIPT=""
-for f in *; do
-    [ -f "$f" ] || continue
-    case "$f" in CHGCAR|CHG|WAVECAR|vasprun.xml|vaspout.h5|PROCAR|POTCAR|DOSCAR|OUTCAR|*_OUTCAR|XDATCAR|AECCAR*|LOCPOT|ELFCAR) continue ;; esac
-    runscript_scheduler "$f" >/dev/null && SUBMISSION_SCRIPT="${SUBMISSION_SCRIPT:+$SUBMISSION_SCRIPT }$f"
-done
-[ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found in $PWD"
+# Submission script: header-limited scan (first 4 KB), asks if there are several ($RUNSCRIPT overrides)
+SUBMISSION_SCRIPT=$(find_runscript)
+[ -z "$SUBMISSION_SCRIPT" ] && echo -e "\033[33mWARNING:\033[0m no #PBS/#SBATCH submission script found (or none selected) in $PWD"
 COPY_FILES_NEEDED="INCAR POSCAR POTCAR $SUBMISSION_SCRIPT"
 LN_FILES_NEEDED="CHGCAR"
 NEW_DIRECTORY="DOS"
