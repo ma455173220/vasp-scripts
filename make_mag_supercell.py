@@ -5,9 +5,14 @@ make_mag_supercell.py
 从 primitive cell 建超胞，并根据原胞的 MAGMOM 自动生成超胞的 MAGMOM。
 
 原理：
-  超胞的每个原子都能追溯到原胞中的某个原子（通过 ASE make_supercell 的映射），
-  直接继承该原子在原胞中的磁矩即可。对于 G-AFM 体系，
-  周期性平移会自动保证近邻反平行，无需手动逐个指定。
+  超胞的每个原子都能追溯到原胞中的某个原子 j 和一个原胞平移 R（通过分数坐标匹配）。
+  默认：直接继承该原子在原胞中的磁矩 m_j（只能复现原胞内已有的磁序，k = 0）。
+  --kvec kx ky kz：磁传播矢量（原胞倒格子单位），m(R) = m_j · cos(2π k·R)（共线）。
+    原胞里只有一个磁性原子时，反铁磁序必须用 k 给出，例如
+      简单立方 / 钙钛矿 B 位 G-AFM：  --kvec 1/2 1/2 1/2  --supercell 2 2 2
+      岩盐 fcc 原胞 AFM-II（NiO）：   --kvec 1/2 1/2 1/2  --matrix "1 1 0 / 0 1 1 / 1 0 1"
+    超胞必须与 k 公度（扩胞矩阵 M 满足 M·k 为整数），否则报错。
+    k 只含 0 和 1/2 时得到 ±m 的普通反铁磁；其他 k 给出 cos 调制的共线磁矩。
 
 用法：
     # 最常用：2x2x2 超胞
@@ -24,6 +29,9 @@ make_mag_supercell.py
 
     # 同时写出超胞 POSCAR（默认只打印 MAGMOM，不写文件）
     python make_mag_supercell.py -f POSCAR --supercell 2 2 2 --export
+
+    # 单磁性原子原胞的 G-AFM（传播矢量 k = (1/2, 1/2, 1/2)）
+    python make_mag_supercell.py -f POSCAR --supercell 2 2 2 --magmom "4" --kvec 1/2 1/2 1/2
 
 依赖：
     pip install ase spglib numpy
@@ -100,7 +108,25 @@ def parse_matrix_arg(matrix_str):
     return M
 
 
-def expand_magmom(prim_magmom, prim_atoms, super_atoms):
+def parse_kvec(tokens):
+    """['1/2', '0.5', '0'] -> np.array([0.5, 0.5, 0.0])"""
+    from fractions import Fraction
+    try:
+        return np.array([float(Fraction(t)) for t in tokens])
+    except (ValueError, ZeroDivisionError):
+        raise ValueError(f"--kvec 需要三个数（可写成分数，如 1/2）：{' '.join(tokens)}")
+
+
+def check_commensurate(M, kvec, tol=1e-6):
+    """超胞平移（M 的行，原胞基矢单位）与 k 公度：M·k 必须为整数。"""
+    mk = np.asarray(M, dtype=float) @ kvec
+    if not np.allclose(mk, np.round(mk), atol=tol):
+        raise ValueError(
+            f"超胞与 k = {kvec} 不公度：M·k = {np.round(mk, 4)} 不是整数。"
+            f"请换扩胞矩阵（例如 k = (1/2,1/2,1/2) 用 --supercell 2 2 2）。")
+
+
+def expand_magmom(prim_magmom, prim_atoms, super_atoms, kvec=None):
     """
     将原胞 MAGMOM 扩展到超胞。
 
@@ -109,15 +135,18 @@ def expand_magmom(prim_magmom, prim_atoms, super_atoms):
     但实际上 ASE 是交错排列的，需要用 get_tags() 或位置匹配来追溯。
 
     这里用最可靠的方法：通过超胞原子的分数坐标 mod 1 匹配原胞原子。
+    kvec 不为 None 时，m = m_j · cos(2π k·R)，R 为超胞原子相对原胞原子 j 的原胞平移。
     """
-    prim_frac  = prim_atoms.get_scaled_positions() % 1.0
+    prim_raw   = prim_atoms.get_scaled_positions(wrap=False)
+    prim_frac  = prim_raw % 1.0
     prim_syms  = prim_atoms.get_chemical_symbols()
 
     # 超胞的分数坐标需要转换到原胞的坐标系
     # 即：super_frac_in_prim = super_cart @ inv(prim_cell)
     prim_cell_inv = np.linalg.inv(prim_atoms.get_cell()[:])
     super_cart    = super_atoms.get_positions()
-    super_frac_in_prim = (super_cart @ prim_cell_inv) % 1.0
+    super_unwrapped = super_cart @ prim_cell_inv
+    super_frac_in_prim = super_unwrapped % 1.0
 
     super_syms = super_atoms.get_chemical_symbols()
     super_magmom = np.zeros(len(super_atoms))
@@ -141,6 +170,11 @@ def expand_magmom(prim_magmom, prim_atoms, super_atoms):
             super_magmom[i] = 0.0
         else:
             super_magmom[i] = prim_magmom[best_idx]
+            if kvec is not None:
+                R = np.round(super_unwrapped[i] - prim_raw[best_idx])
+                phase = np.cos(2 * np.pi * np.dot(kvec, R))
+                # + 0.0 turns -0.0 into 0.0 (non-magnetic atoms stay "0" in MAGMOM)
+                super_magmom[i] = super_magmom[i] * (0.0 if abs(phase) < 1e-12 else round(phase, 10)) + 0.0
 
     return super_magmom
 
@@ -197,6 +231,9 @@ def main():
         help="INCAR 文件路径（用于自动读取 MAGMOM，默认：INCAR）")
     parser.add_argument("--outfile", "-o", type=str, default="POSCAR_super",
         help="输出文件名（默认：POSCAR_super）")
+    parser.add_argument("--kvec", nargs=3, metavar=("KX", "KY", "KZ"), default=None,
+        help="磁传播矢量（原胞倒格子单位，可用分数），m(R) = m0·cos(2π k·R)，"
+             "如 --kvec 1/2 1/2 1/2（G-AFM）。不给则继承原胞磁矩（k = 0）")
     parser.add_argument("--export", action="store_true",
         help="写出超胞 POSCAR（默认只打印 MAGMOM）")
     args = parser.parse_args()
@@ -265,8 +302,19 @@ def main():
     for i, (s, m) in enumerate(zip(syms, prim_magmom)):
         print(f"  原子 {i+1:>3} ({s}): {m:+.1f}")
 
+    # ── 传播矢量 ──
+    kvec = None
+    if args.kvec is not None:
+        try:
+            kvec = parse_kvec(args.kvec)
+            check_commensurate(M, kvec)
+        except ValueError as e:
+            print(f"[错误] {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"\n传播矢量 k = {kvec}（原胞倒格子单位），m(R) = m0·cos(2π k·R)")
+
     # ── 扩展 MAGMOM 到超胞 ──
-    super_magmom = expand_magmom(prim_magmom, prim, super_atoms)
+    super_magmom = expand_magmom(prim_magmom, prim, super_atoms, kvec)
 
     # ── 打印结果 ──
     # 同步排序结构和 MAGMOM

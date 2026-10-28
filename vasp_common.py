@@ -28,6 +28,10 @@ Contents
     outcar_tail(path, nbytes)       last bytes of an OUTCAR as text
     outcar_contains(path, text)     tail first, then a streamed scan (no full read)
     outcar_natoms(path)             NIONS
+    outcar_head_search(path, regex) first match (group 1) near the top of an OUTCAR
+    outcar_last_match(path, regex)  last match (group 1) in the tail of an OUTCAR
+    outcar_last_forces(path, n)     last TOTAL-FORCE block as an (n, 3) array
+    oszicar_scf_steps(path)         electronic steps of every ionic step
     oszicar_last(path)              last ionic line: {"E0", "F", "mag", "line"}
     job_status(dir, final=True)     ("converged"|"unconverged"|"running"|"failed", reason),
                                     same table as VASP_JOB_PARAMETERS / vasp_common.sh
@@ -262,6 +266,64 @@ def outcar_natoms(path):
                 if m:
                     return int(m.group(1))
     return None
+
+
+def outcar_head_search(path, pattern, max_bytes=20_000_000):
+    """Group 1 (or the whole match) of the first match of pattern, streaming from the
+    top of the file and stopping after max_bytes; None if not found."""
+    rx = re.compile(pattern)
+    read = 0
+    with open(path, errors="replace") as f:
+        for line in f:
+            m = rx.search(line)
+            if m:
+                return m.group(1) if m.groups() else m.group(0)
+            read += len(line)
+            if read > max_bytes:
+                break
+    return None
+
+
+def outcar_last_match(path, pattern, nbytes=2_000_000):
+    """Group 1 (or the whole match) of the last match of pattern in the tail."""
+    found = re.findall(pattern, outcar_tail(path, nbytes))
+    if not found:
+        return None
+    last = found[-1]
+    return last[0] if isinstance(last, tuple) else last
+
+
+def outcar_last_forces(path, natoms):
+    """Forces (eV/A) of the last complete "TOTAL-FORCE" block, read from the tail."""
+    if not natoms:
+        return None
+    text = outcar_tail(path, max(2_000_000, natoms * 200 + 1_000_000))
+    pos = text.rfind("TOTAL-FORCE")
+    while pos != -1:
+        rows = text[pos:].splitlines()[2:2 + natoms]
+        try:
+            forces = np.array([[float(x) for x in r.split()[3:6]] for r in rows])
+            if forces.shape == (natoms, 3):
+                return forces
+        except ValueError:
+            pass
+        pos = text.rfind("TOTAL-FORCE", 0, pos)   # incomplete block (still running)
+    return None
+
+
+def oszicar_scf_steps(path):
+    """Number of electronic steps in each ionic step of an OSZICAR (streamed)."""
+    steps, last = [], 0
+    rx = re.compile(r"^\s*[A-Za-z]{2,3}\s*:\s*(\d+)\s")
+    with open(path, errors="replace") as f:
+        for line in f:
+            m = rx.match(line)
+            if m:
+                last = int(m.group(1))
+            elif "F=" in line and last:
+                steps.append(last)
+                last = 0
+    return steps
 
 
 def oszicar_last(path):

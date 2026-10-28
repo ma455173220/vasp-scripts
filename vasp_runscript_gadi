@@ -1,0 +1,41 @@
+#!/bin/bash
+#PBS -P ad73
+#PBS -q normal
+#PBS -N vasp
+#PBS -l walltime=48:00:00
+#PBS -l ncpus=96
+#PBS -l mem=380GB
+#PBS -l jobfs=10GB
+#PBS -l storage=gdata/ad73+scratch/ad73
+#PBS -l wd
+#PBS -j oe
+# Gadi (PBS) VASP job template. Copy it to "vasp_runscript" in the work directory:
+# the workflow generator, gibbs.sh, vasp_nupdown_test.sh, vasp_strain.sh and
+# superfrac_slurm.sh use that name; band/dos/soc/non_sc/stm pick any file with #PBS.
+# Edited automatically: JOBNAME, VASP_EXE and "#PBS -N" (keep their format).
+# normal queue: 48 cores and 190 GB per node -> ncpus in multiples of 48, ~4 GB per core.
+
+JOBNAME="00"         # prefix of the backed-up files (00_OUTCAR, ...); set by the workflow generator
+VASP_EXE="vasp_std"  # vasp_std / vasp_gam / vasp_ncl; set by the generator, non_sc, soc, gibbs
+
+# End-of-job hook: backups, convergence check, ~/vasp_job_log, Bader, band gap / DOS
+VJP=/home/561/hm1876/vasp-scripts/VASP_JOB_PARAMETERS_gadi   # CHECK: path of the vasp-scripts repo on Gadi
+[ -f "$VJP" ] || VJP=$(command -v VASP_JOB_PARAMETERS_gadi)
+if [ -n "$VJP" ]; then
+    source "$VJP"
+else
+    echo "WARNING: VASP_JOB_PARAMETERS_gadi not found - no backups / convergence check for this job" >&2
+fi
+
+VASP_MODULE="vasp/VERSION"    # CHECK: put the real module name here (module avail vasp)
+module purge
+module load pbs
+module load "$VASP_MODULE"
+
+# Stop early (before the allocation is wasted) if the VASP executable is not there
+if ! command -v "$VASP_EXE" >/dev/null 2>&1; then
+    echo "ERROR: $VASP_EXE not found - fix 'module load vasp/...' (module avail vasp) in this job script" >&2
+    exit 1
+fi
+
+mpirun -np $PBS_NCPUS $VASP_EXE > vasp_log 2>&1

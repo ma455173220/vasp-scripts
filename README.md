@@ -21,6 +21,9 @@ NSW 缺省或 ≤ 0 → 静态，看 `EDIFF is reached`；IBRION = 1/2/3/44 → 
 | 文件 | 用途 |
 |---|---|
 | `vasp_runscript_setonix` | Setonix Slurm 作业模板（VASP 6.4.3） |
+| `vasp_runscript_gadi` | Gadi PBS 作业模板（ad73、normal 队列、ncpus 为 48 的倍数、`source VASP_JOB_PARAMETERS_gadi`）。⚠️ 使用前改两处 `CHECK`：仓库在 Gadi 上的路径、`VASP_MODULE`（`module avail vasp`）；找不到 `$VASP_EXE` 时作业立即退出 |
+
+模板的用法：复制到计算目录并命名为 `vasp_runscript`（`cp vasp_runscript_gadi vasp_runscript`）。workflow 生成器、`gibbs.sh`、`vasp_nupdown_test.sh`、`vasp_strain.sh`、`superfrac_slurm.sh` 默认用这个文件名；`band/dos/soc/non_sc/stm` 会自动找目录里带 `#PBS`/`#SBATCH` 头的文件。脚本会自动修改其中的 `JOBNAME="..."`、`VASP_EXE="..."` 和 `#PBS -N`，请保持这几行的格式。
 | `VASP_JOB_PARAMETERS` | 作业结束钩子的实现：备份并重命名输出、判断是否收敛、写 `~/vasp_job_log`（失败另写 `~/vasp_fail_log`，作业返回 1）、Bader、静态计算的带隙和 DOS；路径由 `find_tool` 查找（旧绝对路径优先） |
 | `VASP_JOB_PARAMETERS_slurm` / `VASP_JOB_PARAMETERS_gadi` | runscript 里 `source` 的仍是这两个文件名：各 3 行，设置站点（`VJP_SITE`）后加载 `VASP_JOB_PARAMETERS`（同目录，否则 `PATH`）。Gadi：总是备份、`band_vaspkit.py`、`VASP_AUTO_SUBMISSION`、`CHECK_AUTO_STOP`；Slurm：IBRION=-1 时不备份 |
 | `vasp_incar` | 带注释的 INCAR 总模板（band/dos/soc/stm 脚本会取消其中 `# KEY` 行的注释） |
@@ -33,7 +36,8 @@ NSW 缺省或 ≤ 0 → 静态，看 `EDIFF is reached`；IBRION = 1/2/3/44 → 
 |---|---|
 | `vasp_workflow_input_generator.sh` | 生成 step0–5（gamma 预优化 → 优化 → 优化 → SCF → 能带 → DOS）的 INCAR、KPOINTS、作业脚本和串行 workflow 脚本 `<prefix>.sh`（PBS 或 Slurm）。参数：`--scheduler auto\|pbs\|slurm --prefix --steps "0 1 2" --run --offset --dipole y\|n --scf-dir --runscript --yes`（`--help`），缺的才会问。workflow 被杀掉后重新 `nohup ./<prefix>.sh &` 即可：已完成的步骤（`.workflow_stepN.done` 或 SCF/BAND/DOS 目录已收敛）跳过，正在排队/运行的作业接着等，不会重复提交；`FORCE_RERUN=1` 全部重跑 |
 | `vasp_workflow_input_generator_setonix.sh` / `_gadi.sh` | 旧名字，仍可用（含管道输入的回答）：= `--scheduler slurm` / `--scheduler pbs`，提问方式、作业编号和 SCF 目录名与原脚本相同 |
-| `vasp_para_conv.sh` | 通用 INCAR 参数扫描：生成目录并提交（`-h` 查看帮助） |
+| `vasp_para_conv.sh` | 通用 INCAR 参数扫描：生成目录并提交（`-h` 查看帮助）；每个目录写 `generation_info.txt` |
+| `vasp_para_conv_analyse.py` | 扫描结果汇总：状态、E0、E/atom、ΔE（相对上一个 / 参考值，meV/atom）、自由原子最大受力、外压（ENCUT 收敛也要看）、磁矩、SCF 达到 NELM 的离子步数、耗时、NKPTS；输出对齐表格 + CSV，给出 “converged at”（`-t` 阈值，默认 1 meV/atom；`-r` 参考值），`--plot` 出图。只读 OUTCAR 末尾 |
 | `vasp_nupdown_test.sh` | 缺陷 NUPDOWN 测试：提交后汇总，找出能量最低的态（`-m test\|summary -d "v_S*" -s 脚本 -y/-n`，不给就用菜单） |
 | `scan_vasp_energies.py` | 按每原子能量给子目录排序 → `vasp_energy_scan.log`（静态计算也算完成） |
 | `grad.py` | OUTCAR 弛豫监控（能量、SCF 次数、受力） |
@@ -59,7 +63,7 @@ NSW 缺省或 ≤ 0 → 静态，看 `EDIFF is reached`；IBRION = 1/2/3/44 → 
 |---|---|
 | `vasp_strain_gen.sh` | 正应变系列（正交 / 六方晶胞），可以自动接上 workflow（Setonix，用参数调用生成器） |
 | `vasp_strain.sh` + `deform_strain.sh` + `vasp_strain_analysis.sh` | 任意应变分量（含剪切）→ 提交 → EFG 汇总 |
-| `make_mag_supercell.py` | 带 MAGMOM 的超胞 |
+| `make_mag_supercell.py` | 带 MAGMOM 的超胞；`--kvec kx ky kz`（原胞倒格子单位，可写 1/2）给出传播矢量 m(R) = m0·cos(2πk·R)，例如单磁性原子原胞的 G-AFM，会检查超胞是否与 k 公度 |
 | `gen_amorphous.py` | 非晶 AIMD 初始结构（随机空位 + 扰动） |
 | `vacancy_generator.py` | 用 spglib 枚举不等价的空位 / 替位组合 |
 | `superfrac_slurm.sh` + `supercell` | 无序结构枚举 → 计算 → 能量汇总（PBS/Slurm；`-p 前缀 -i CIF -s 2x2x2 generate convert submit extract`，不给动作就用菜单） |
@@ -81,7 +85,7 @@ NSW 缺省或 ≤ 0 → 静态，看 `EDIFF is reached`；IBRION = 1/2/3/44 → 
 |---|---|
 | `bader` | Henkelman Bader v1.05（静态链接） |
 | `supercell` | Okhotnikov supercell |
-| `vasp-xdat-analyzer` | 由 `vasp-xdat-analyzer.f90` 编译：`gfortran -O2 -o vasp-xdat-analyzer vasp-xdat-analyzer.f90` |
+| `vasp-xdat-analyzer` | 由 `vasp-xdat-analyzer.f90` 编译（`make` 或 `gfortran -O2 -o vasp-xdat-analyzer vasp-xdat-analyzer.f90`）。⚠️ 仓库里的二进制是旧版（Setonix 编译），源码已修复 VASP 6.4 物种名（`Ti_pv/hash`）、缩放因子、NPT 每帧晶格、配位数文件名与重复运行；请在 Setonix 上 `make` 重新编译 |
 
 ## 外部依赖
 

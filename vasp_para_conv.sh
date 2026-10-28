@@ -23,6 +23,9 @@
 #   bash vasp_para_conv.sh -p NUPDOWN -v "none 1 3" -f "POSCAR POTCAR KPOINTS job.sh" -j job.sh
 #   bash vasp_para_conv.sh -p ENCUT   -v "400 520 600" -f "POSCAR POTCAR KPOINTS" -j job.sh
 #   bash vasp_para_conv.sh -p MAGMOM  -s , -v "4*1 4*0,4*-1 4*0"
+#
+# 每个测试文件夹里写 generation_info.txt（参数、值、生成顺序）；
+# 算完后汇总分析：vasp_para_conv_analyse.py -p PARAM（能量、ΔE/atom、受力、压力、收敛判断）
 # =============================================================================
 
 set -euo pipefail
@@ -40,7 +43,7 @@ VALUES_RAW=""
 SCRIPT_NAME="$(basename "$0")"
 
 usage() {
-    sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 error_usage() {
@@ -170,6 +173,15 @@ for val in "${VALUES[@]}"; do
         ln -sf "../${lnk}" "${dir_name}/${lnk}"
         echo "  [${dir_name}] 已建立软链接 ${lnk} → ../${lnk}"
     done
+
+    # 机器可读的生成信息（vasp_para_conv_analyse.py 用它找目录并保持生成顺序）
+    cat > "${dir_name}/generation_info.txt" <<EOF
+source_incar=${INCAR_FILE}
+modified_param=${PARAM}
+modified_value=${val}
+generated_dir=${dir_name}
+generation_index=${#GENERATED_DIRS[@]}
+EOF
 
     GENERATED_DIRS+=("$dir_name")
     echo "  → 完成：$dir_name/"
